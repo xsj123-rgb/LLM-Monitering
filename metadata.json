@@ -1,0 +1,6 @@
+{
+  "name": "LLM-Guardian 大模型效能监测平台",
+  "description": "企业级私有化大模型 SLA 监控专家，让每一毫秒的响应延迟都清晰可见。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

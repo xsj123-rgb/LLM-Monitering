@@ -1,0 +1,13 @@
+aiohttp<4.0.0,>=3.10.5
+alembic<2.0.0,>=1.13.2
+apscheduler<4.0.0,>=3.10.4
+argon2-cffi<24.0.0,>=23.1.0
+cryptography<44.0.0,>=43.0.1
+fastapi<1.0.0,>=0.115.0
+pydantic-settings<3.0.0,>=2.5.2
+sqlalchemy<3.0.0,>=2.0.35
+uvicorn[standard]<1.0.0,>=0.31.0
+
+[dev]
+httpx<1.0.0,>=0.27.2
+pytest<9.0.0,>=8.3.3
