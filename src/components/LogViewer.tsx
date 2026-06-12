@@ -6,6 +6,7 @@
 import React from 'react';
 import { MetricLog, DialTask } from '../types';
 import { X, Network, Cpu, Clock, Terminal, CheckCircle2, AlertCircle, FileJson2, ChevronRight } from 'lucide-react';
+import { formatBeijingTimeOnly } from '../lib/time';
 
 interface LogViewerProps {
   log: MetricLog | null;
@@ -65,7 +66,7 @@ export function LogViewer({ log, onClose, associatedTask }: LogViewerProps) {
             <div>
               <div className="text-[10px] text-gray-400 font-medium">发起时间</div>
               <div className="font-mono text-gray-700 mt-1">
-                {new Date(log.timestamp).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+                {formatBeijingTimeOnly(log.timestamp)}
               </div>
             </div>
 

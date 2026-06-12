@@ -11,6 +11,7 @@ from app.schemas.monitoring import (
     ModelChannelResponse,
     SLAThresholds,
 )
+from app.services.time import as_beijing_time
 
 
 def serialize_channel(channel: ModelChannel) -> ModelChannelResponse:
@@ -23,10 +24,10 @@ def serialize_channel(channel: ModelChannel) -> ModelChannelResponse:
         type=channel.type,
         status=channel.status,
         tags=list(channel.tags or []),
-        createdAt=channel.created_at,
-        updatedAt=channel.updated_at,
-        lastProbeAt=channel.last_probe_at,
-        lastOkAt=channel.last_ok_at,
+        createdAt=as_beijing_time(channel.created_at),
+        updatedAt=as_beijing_time(channel.updated_at),
+        lastProbeAt=as_beijing_time(channel.last_probe_at),
+        lastOkAt=as_beijing_time(channel.last_ok_at),
         description=channel.description,
     )
 
@@ -66,10 +67,10 @@ def serialize_task(task: ProbeTask) -> DialTaskResponse:
             minSuccessRate=task.min_success_rate,
         ),
         alertChannels=list(task.alert_channel_ids or []),
-        createdAt=task.created_at,
-        updatedAt=task.updated_at,
-        nextRunAt=task.next_run_at,
-        lastRunAt=task.last_run_at,
+        createdAt=as_beijing_time(task.created_at),
+        updatedAt=as_beijing_time(task.updated_at),
+        nextRunAt=as_beijing_time(task.next_run_at),
+        lastRunAt=as_beijing_time(task.last_run_at),
     )
 
 
@@ -110,8 +111,8 @@ def serialize_alert(alert: AlertEndpoint) -> AlertConfigResponse:
         webhookUrl=alert.webhook_url,
         secret=decrypt_value(alert.secret_encrypted),
         status=alert.status,
-        createdAt=alert.created_at,
-        updatedAt=alert.updated_at,
+        createdAt=as_beijing_time(alert.created_at),
+        updatedAt=as_beijing_time(alert.updated_at),
     )
 
 
@@ -135,7 +136,7 @@ def serialize_probe_run(run: ProbeRun) -> MetricLogResponse:
         taskName=run.task_name,
         channelId=run.channel_id,
         channelName=run.channel_name,
-        timestamp=run.timestamp,
+        timestamp=as_beijing_time(run.timestamp),
         prompt=run.prompt,
         responseText=run.response_text,
         dnsTimeMs=run.dns_time_ms,
@@ -162,7 +163,7 @@ def serialize_probe_run(run: ProbeRun) -> MetricLogResponse:
 def serialize_incident(incident: AlertIncident) -> AlertNotificationResponse:
     return AlertNotificationResponse(
         id=incident.id,
-        timestamp=incident.resolved_at or incident.opened_at,
+        timestamp=as_beijing_time(incident.resolved_at or incident.opened_at),
         channelName=incident.channel_name,
         taskName=incident.task_name,
         metricName=incident.metric_name,

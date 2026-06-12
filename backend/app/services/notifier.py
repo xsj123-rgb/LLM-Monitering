@@ -14,13 +14,14 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.core.security import decrypt_value
 from app.models.alert import AlertDelivery, AlertEndpoint, AlertIncident
+from app.services.time import as_beijing_time
 
 
 def build_notification_payload(incident: AlertIncident) -> dict:
     return {
         "id": incident.id,
         "status": incident.status,
-        "timestamp": (incident.resolved_at or incident.opened_at).isoformat(),
+        "timestamp": as_beijing_time(incident.resolved_at or incident.opened_at).isoformat(),
         "taskName": incident.task_name,
         "channelName": incident.channel_name,
         "metricName": incident.metric_name,

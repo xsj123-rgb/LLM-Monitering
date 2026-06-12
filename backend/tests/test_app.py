@@ -170,6 +170,7 @@ def test_manual_probe_writes_log_and_creates_incident(monkeypatch) -> None:
 
     manual_probe = client.post(f"/api/tasks/{task['id']}/probe")
     assert manual_probe.status_code == 200
+    assert manual_probe.json()["timestamp"].endswith("+08:00")
     assert manual_probe.json()["violatedTtft"] is True
     assert manual_probe.json()["violatedTps"] is True
     assert manual_probe.json()["violatedExtLatency"] is True
@@ -182,6 +183,7 @@ def test_manual_probe_writes_log_and_creates_incident(monkeypatch) -> None:
     assert notifications.status_code == 200
     payload = notifications.json()
     assert len(payload) == 3
+    assert all(item["timestamp"].endswith("+08:00") for item in payload)
     assert {item["metricName"] for item in payload} == {
         "首字延迟 (TTFT)",
         "吞吐速率 (TPS)",

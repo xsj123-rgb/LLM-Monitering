@@ -39,6 +39,7 @@ from app.services.serialization import (
     serialize_probe_run,
     serialize_task,
 )
+from app.services.time import as_beijing_time
 from app.state import scheduler
 
 router = APIRouter(prefix="/api", tags=["monitoring"])
@@ -269,7 +270,7 @@ def dashboard_series(db: DBSession, _: CurrentUser, channel_id: str | None = Non
     logs = list(db.scalars(stmt))
     return [
         DashboardSeriesPoint(
-            timestamp=log.timestamp,
+            timestamp=as_beijing_time(log.timestamp),
             ttftMs=log.ttft_ms,
             totalLatencyMs=log.total_latency_ms,
             tps=log.tps,

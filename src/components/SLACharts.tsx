@@ -5,20 +5,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { MetricLog, SLAThresholds } from '../types';
-
-function getBeijingTimeDetails(dateObj: Date | string) {
-  const d = typeof dateObj === 'string' ? new Date(dateObj) : dateObj;
-  // Convert to UTC epoch first then add +8 hours
-  const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-  const beijingDate = new Date(utc + 3600000 * 8);
-  return {
-    hours: beijingDate.getHours(),
-    minutes: beijingDate.getMinutes(),
-    month: beijingDate.getMonth() + 1,
-    date: beijingDate.getDate(),
-    year: beijingDate.getFullYear()
-  };
-}
+import { formatBeijingTime, getBeijingDateInputMax, getBeijingDateParts } from '../lib/time';
 
 interface SLAChartsProps {
   logs: MetricLog[];
@@ -300,7 +287,7 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
       const idx = Math.round((i / (labelsCount - 1)) * (chartLogs.length - 1));
       const log = chartLogs[idx];
       if (!log) continue;
-      const bjObj = getBeijingTimeDetails(log.timestamp);
+      const bjObj = getBeijingDateParts(log.timestamp);
       
       // format label depending on timeRange
       let labelStr = '';
@@ -583,7 +570,7 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
             <div className="flex items-center gap-2 font-semibold">
               <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
               <span className="font-mono text-gray-300">
-                时间点: {new Date(activeLog.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+                时间点: {formatBeijingTime(activeLog.timestamp)}
               </span>
             </div>
             <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
@@ -751,7 +738,7 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
               <input
                 type="date"
                 value={customStart}
-                max={now.toISOString().split('T')[0]}
+                max={getBeijingDateInputMax(now)}
                 onChange={e => setCustomStart(e.target.value)}
                 className="px-2 py-1 bg-white border border-gray-200 rounded-md outline-none"
               />
@@ -759,7 +746,7 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
               <input
                 type="date"
                 value={customEnd}
-                max={now.toISOString().split('T')[0]}
+                max={getBeijingDateInputMax(now)}
                 onChange={e => setCustomEnd(e.target.value)}
                 className="px-2 py-1 bg-white border border-gray-200 rounded-md outline-none"
               />

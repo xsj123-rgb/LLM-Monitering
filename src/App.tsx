@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 
 import { api, ApiError } from './lib/api';
+import { formatBeijingTime } from './lib/time';
 import type {
   AlertConfig,
   AlertNotification,
@@ -47,13 +48,6 @@ type Toast = {
   message: string;
   category: 'info' | 'success' | 'warn' | 'error';
 };
-
-function formatBeijingTime(value: string) {
-  return new Date(value).toLocaleString('zh-CN', {
-    hour12: false,
-    timeZone: 'Asia/Shanghai',
-  });
-}
 
 function buildToast(title: string, message: string, category: Toast['category']): Toast {
   return {

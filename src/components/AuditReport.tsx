@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { MetricLog, ModelChannel, DialTask } from '../types';
 import { CalendarRange, ClipboardCheck, ArrowUpRight, Cpu, HelpCircle, HardDrive, ShieldCheck, Send, Printer, Sliders } from 'lucide-react';
+import { formatBeijingTime } from '../lib/time';
 
 interface AuditReportProps {
   logs: MetricLog[];
@@ -105,7 +106,7 @@ export function AuditReport({ logs, channels, tasks, onTriggerNotify }: AuditRep
     
     currentPeriodLogs.forEach(log => {
       const isViolated = log.violatedTtft || log.violatedTps || log.violatedExtLatency ? 'YES' : 'NO';
-      const row = `"${log.timestamp}","${log.channelName}","${log.taskName}",${log.ttftMs},${log.tps},${log.totalLatencyMs},"${log.success ? 'SUCCESS' : 'FAILED'}","${isViolated}"`;
+      const row = `"${formatBeijingTime(log.timestamp)}","${log.channelName}","${log.taskName}",${log.ttftMs},${log.tps},${log.totalLatencyMs},"${log.success ? 'SUCCESS' : 'FAILED'}","${isViolated}"`;
       csvContent += row + '\n';
     });
 
@@ -120,7 +121,7 @@ export function AuditReport({ logs, channels, tasks, onTriggerNotify }: AuditRep
   };
 
   const handleExportPDF = () => {
-    const timestamp = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + ' (北京时间)';
+    const timestamp = `${formatBeijingTime(new Date())} (北京时间)`;
     const periodName = reportPeriod === 'daily' ? '每日审计 (Daily Snapshot)' : reportPeriod === 'weekly' ? '周度评估 (Weekly Overview)' : '月度审计 (Monthly Compliance)';
     
     // Professional styled corporate report printed as highres vector PDF bypassing font encoding limits
