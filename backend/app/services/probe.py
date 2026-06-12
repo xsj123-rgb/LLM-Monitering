@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.adapters.custom import CustomProbeAdapter
 from app.adapters.ollama import OllamaProbeAdapter
 from app.adapters.openai import OpenAICompatibleProbeAdapter
 from app.core.events import event_broker
@@ -15,6 +16,8 @@ from app.services.notifier import deliver_incident
 
 
 def get_adapter(channel_type: str):
+    if channel_type == "custom":
+        return CustomProbeAdapter()
     if channel_type == "ollama":
         return OllamaProbeAdapter()
     return OpenAICompatibleProbeAdapter()

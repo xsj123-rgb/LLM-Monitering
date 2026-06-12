@@ -55,6 +55,8 @@ export function ChannelModal({ isOpen, onClose, onSave, channel }: ChannelModalP
         setApiEndpoint('https://api.openai.com/v1/chat/completions');
       } else if (newType === 'ollama') {
         setApiEndpoint('http://localhost:11434/api/chat');
+      } else if (newType === 'custom') {
+        setApiEndpoint('http://localhost:1234/api/v1/chat');
       } else if (newType === 'huggingface') {
         setApiEndpoint('https://api-inference.huggingface.co/models/');
       }
