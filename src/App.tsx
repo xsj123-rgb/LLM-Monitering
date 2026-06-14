@@ -30,6 +30,7 @@ import type {
   AlertNotification,
   AuthUser,
   DialTask,
+  ManagedUser,
   MetricLog,
   ModelChannel,
 } from './types';
@@ -41,14 +42,23 @@ import { TaskModal } from './components/TaskModal';
 import { AlertConfigModal } from './components/AlertConfigModal';
 import { LogViewer } from './components/LogViewer';
 import { AuditReport } from './components/AuditReport';
+import { UserManagementPanel } from './components/UserManagementPanel';
+import { ConfirmDialog } from './components/ConfirmDialog';
+import { AppSelect } from './components/AppSelect';
 
-type ActiveTab = 'dashboard' | 'channels' | 'tasks' | 'logs' | 'alerts' | 'report';
+type ActiveTab = 'dashboard' | 'channels' | 'tasks' | 'logs' | 'alerts' | 'report' | 'users';
 type Toast = {
   id: string;
   title: string;
   message: string;
   category: 'info' | 'success' | 'warn' | 'error';
 };
+
+type PendingConfirmation =
+  | { kind: 'channel'; id: string; name: string }
+  | { kind: 'task'; id: string; name: string }
+  | { kind: 'alert'; id: string; name: string }
+  | { kind: 'user'; id: string; name: string };
 
 function buildToast(title: string, message: string, category: Toast['category']): Toast {
   return {
@@ -72,7 +82,9 @@ export default function App() {
   const [alerts, setAlerts] = useState<AlertConfig[]>([]);
   const [logs, setLogs] = useState<MetricLog[]>([]);
   const [notifications, setNotifications] = useState<AlertNotification[]>([]);
+  const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
   const [loadingData, setLoadingData] = useState(false);
+  const [loadingUsers, setLoadingUsers] = useState(false);
   const [selectedDiagnosticLog, setSelectedDiagnosticLog] = useState<MetricLog | null>(null);
 
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
@@ -91,6 +103,9 @@ export default function App() {
   const [probeLoadingTaskId, setProbeLoadingTaskId] = useState<string | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+  const isAdmin = user?.role === 'admin';
 
   const addToast = (title: string, message: string, category: Toast['category'] = 'info') => {
     const toast = buildToast(title, message, category);
@@ -126,6 +141,26 @@ export default function App() {
     }
   };
 
+  const loadUsers = async (role: AuthUser['role'] | null = user?.role ?? null) => {
+    if (role !== 'admin') {
+      setManagedUsers([]);
+      return;
+    }
+    setLoadingUsers(true);
+    try {
+      const nextUsers = await api.auth.listUsers();
+      setManagedUsers(nextUsers);
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        setManagedUsers([]);
+        return;
+      }
+      addToast('账号加载失败', error instanceof Error ? error.message : '未知错误', 'error');
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     async function bootstrap() {
@@ -135,6 +170,7 @@ export default function App() {
         if (auth.authenticated && auth.user) {
           setUser(auth.user);
           await loadData();
+          await loadUsers(auth.user.role);
         }
       } catch (error) {
         if (!cancelled) {
@@ -172,6 +208,11 @@ export default function App() {
     };
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    void loadUsers(user.role);
+  }, [user]);
+
   const handleLogin = async (username: string, password: string) => {
     setLoginSubmitting(true);
     setLoginError(null);
@@ -203,6 +244,7 @@ export default function App() {
     setLogs([]);
     setNotifications([]);
     setSelectedDiagnosticLog(null);
+    setManagedUsers([]);
   };
 
   const handleChangePassword = async (currentPassword: string, newPassword: string) => {
@@ -216,6 +258,50 @@ export default function App() {
       addToast('修改失败', error instanceof Error ? error.message : '修改密码失败', 'error');
     } finally {
       setChangingPassword(false);
+    }
+  };
+
+  const handleCreateUser = async (payload: { username: string; password: string; role: 'admin' | 'user'; is_active: boolean }) => {
+    try {
+      await api.auth.createUser(payload);
+      addToast('账号已创建', `账号「${payload.username}」已创建。`, 'success');
+      await loadUsers('admin');
+    } catch (error) {
+      addToast('创建失败', error instanceof Error ? error.message : '未知错误', 'error');
+    }
+  };
+
+  const handleToggleUserStatus = async (managedUser: ManagedUser) => {
+    try {
+      await api.auth.updateUser(managedUser.id, { is_active: !managedUser.is_active });
+      addToast('账号状态已更新', `账号「${managedUser.username}」已${managedUser.is_active ? '停用' : '启用'}。`, 'info');
+      await loadUsers('admin');
+    } catch (error) {
+      addToast('更新失败', error instanceof Error ? error.message : '未知错误', 'error');
+    }
+  };
+
+  const handleResetUserPassword = async (managedUser: ManagedUser, newPassword: string) => {
+    try {
+      await api.auth.resetUserPassword(managedUser.id, newPassword);
+      addToast('密码已重置', `账号「${managedUser.username}」的新密码已保存。`, 'success');
+      await loadUsers('admin');
+    } catch (error) {
+      addToast('重置失败', error instanceof Error ? error.message : '未知错误', 'error');
+    }
+  };
+
+  const handleDeleteUser = async (managedUser: ManagedUser) => {
+    setPendingConfirmation({ kind: 'user', id: managedUser.id, name: managedUser.username });
+  };
+
+  const handleConfirmedDeleteUser = async (managedUser: { id: string; name: string }) => {
+    try {
+      await api.auth.deleteUser(managedUser.id);
+      addToast('账号已删除', `账号「${managedUser.name}」已移除。`, 'warn');
+      await loadUsers('admin');
+    } catch (error) {
+      addToast('删除失败', error instanceof Error ? error.message : '未知错误', 'error');
     }
   };
 
@@ -235,7 +321,10 @@ export default function App() {
   };
 
   const handleDeleteChannel = async (channel: ModelChannel) => {
-    if (!window.confirm(`确认删除模型渠道「${channel.name}」？`)) return;
+    setPendingConfirmation({ kind: 'channel', id: channel.id, name: channel.name });
+  };
+
+  const handleConfirmedDeleteChannel = async (channel: { id: string; name: string }) => {
     try {
       await api.channels.remove(channel.id);
       addToast('渠道已删除', `「${channel.name}」及其关联任务已移除。`, 'warn');
@@ -261,7 +350,10 @@ export default function App() {
   };
 
   const handleDeleteTask = async (task: DialTask) => {
-    if (!window.confirm(`确认删除拨测策略「${task.name}」？`)) return;
+    setPendingConfirmation({ kind: 'task', id: task.id, name: task.name });
+  };
+
+  const handleConfirmedDeleteTask = async (task: { id: string; name: string }) => {
     try {
       await api.tasks.remove(task.id);
       addToast('策略已删除', `「${task.name}」已从调度器移除。`, 'warn');
@@ -318,13 +410,35 @@ export default function App() {
   };
 
   const handleDeleteAlert = async (alert: AlertConfig) => {
-    if (!window.confirm(`确认删除告警通道「${alert.name}」？`)) return;
+    setPendingConfirmation({ kind: 'alert', id: alert.id, name: alert.name });
+  };
+
+  const handleConfirmedDeleteAlert = async (alert: { id: string; name: string }) => {
     try {
       await api.alerts.remove(alert.id);
       addToast('告警通道已删除', `「${alert.name}」已移除。`, 'warn');
       await loadData();
     } catch (error) {
       addToast('删除失败', error instanceof Error ? error.message : '未知错误', 'error');
+    }
+  };
+
+  const handleConfirmAction = async () => {
+    if (!pendingConfirmation) return;
+    setConfirmSubmitting(true);
+    try {
+      if (pendingConfirmation.kind === 'channel') {
+        await handleConfirmedDeleteChannel(pendingConfirmation);
+      } else if (pendingConfirmation.kind === 'task') {
+        await handleConfirmedDeleteTask(pendingConfirmation);
+      } else if (pendingConfirmation.kind === 'user') {
+        await handleConfirmedDeleteUser(pendingConfirmation);
+      } else {
+        await handleConfirmedDeleteAlert(pendingConfirmation);
+      }
+      setPendingConfirmation(null);
+    } finally {
+      setConfirmSubmitting(false);
     }
   };
 
@@ -467,7 +581,7 @@ export default function App() {
               </div>
               <div className="hidden sm:block">
                 <div className="text-xs font-semibold text-gray-900">{user.username}</div>
-                <div className="text-[10px] text-gray-500">管理员</div>
+                <div className="text-[10px] text-gray-500">{isAdmin ? '管理员' : '普通用户'}</div>
               </div>
               <button
                 className="hidden rounded-lg px-2 py-1 text-[11px] font-semibold text-gray-500 transition hover:bg-white sm:block"
@@ -488,7 +602,7 @@ export default function App() {
 
         <div className="flex min-h-0 flex-1">
           <aside className="hidden w-64 shrink-0 flex-col border-r border-gray-200 bg-white p-6 md:flex">
-            <SidebarNav activeTab={activeTab} firingCount={firingCount} onChange={setActiveTab} />
+            <SidebarNav activeTab={activeTab} firingCount={firingCount} isAdmin={isAdmin} onChange={setActiveTab} />
             <div className="mt-auto border-t border-gray-100 pt-4">
               <div className="rounded-xl bg-gray-50 p-4">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-400">今日探测概览</div>
@@ -506,6 +620,7 @@ export default function App() {
               <MobileTab label="时序日志" active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} />
               <MobileTab label="告警终端" active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')} />
               <MobileTab label="合规审计" active={activeTab === 'report'} onClick={() => setActiveTab('report')} />
+              {isAdmin ? <MobileTab label="账号管理" active={activeTab === 'users'} onClick={() => setActiveTab('users')} /> : null}
             </div>
 
             <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
@@ -527,18 +642,15 @@ export default function App() {
                         </h3>
                         <p className="mt-1 text-[11px] text-gray-400">聚合 TTFT、TPS、ITL 与 E2E 的时序拨测结果。</p>
                       </div>
-                      <select
+                      <AppSelect
                         value={dashboardChannelId}
-                        onChange={(event) => setDashboardChannelId(event.target.value)}
-                        className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs outline-none"
-                      >
-                        <option value="">-- 所有渠道合并分析 --</option>
-                        {channels.map((channel) => (
-                          <option key={channel.id} value={channel.id}>
-                            {channel.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={setDashboardChannelId}
+                        options={[
+                          { value: '', label: '-- 所有渠道合并分析 --' },
+                          ...channels.map((channel) => ({ value: channel.id, label: channel.name })),
+                        ]}
+                        className="rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                      />
                     </div>
 
                     <SLACharts
@@ -631,11 +743,11 @@ export default function App() {
                   <PageHeader
                     title="渠道管理"
                     description="录入、维护和查看被监控的大模型服务端点。"
-                    actionLabel="新增渠道"
-                    onAction={() => {
+                    actionLabel={isAdmin ? '新增渠道' : undefined}
+                    onAction={isAdmin ? () => {
                       setEditingChannel(null);
                       setIsChannelModalOpen(true);
-                    }}
+                    } : undefined}
                   />
 
                   <div className="flex items-center gap-3 rounded-[24px] border border-gray-100 bg-white px-4 py-3 shadow-xs">
@@ -663,20 +775,22 @@ export default function App() {
                               {channel.apiEndpoint}
                             </div>
                           </div>
-                          <div className="flex shrink-0 items-center gap-1">
-                            <IconButton
-                              title="编辑"
-                              onClick={() => {
-                                setEditingChannel(channel);
-                                setIsChannelModalOpen(true);
-                              }}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </IconButton>
-                            <IconButton title="删除" onClick={() => void handleDeleteChannel(channel)}>
-                              <Trash2 className="h-4 w-4" />
-                            </IconButton>
-                          </div>
+                          {isAdmin ? (
+                            <div className="flex shrink-0 items-center gap-1">
+                              <IconButton
+                                title="编辑"
+                                onClick={() => {
+                                  setEditingChannel(channel);
+                                  setIsChannelModalOpen(true);
+                                }}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </IconButton>
+                              <IconButton title="删除" onClick={() => void handleDeleteChannel(channel)}>
+                                <Trash2 className="h-4 w-4" />
+                              </IconButton>
+                            </div>
+                          ) : null}
                         </div>
 
                         <div className="mt-4 flex flex-wrap gap-2">
@@ -709,11 +823,11 @@ export default function App() {
                   <PageHeader
                     title="拨测配置"
                     description="为指定模型渠道配置定时主动拨测任务、SLA 阈值和告警联动。"
-                    actionLabel="新增任务"
-                    onAction={() => {
+                    actionLabel={isAdmin ? '新增任务' : undefined}
+                    onAction={isAdmin ? () => {
                       setEditingTask(null);
                       setIsTaskModalOpen(true);
-                    }}
+                    } : undefined}
                   />
 
                   <div className="space-y-4">
@@ -734,35 +848,37 @@ export default function App() {
                               <div className="mt-2 rounded-2xl bg-gray-50 px-4 py-3 text-sm leading-6 text-gray-600">{task.prompt}</div>
                             </div>
 
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                className="flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
-                                onClick={() => void handleToggleTask(task)}
-                              >
-                                {task.status === 'running' ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                                {task.status === 'running' ? '暂停' : '恢复'}
-                              </button>
-                              <button
-                                className="flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-70"
-                                onClick={() => void handleManualProbe(task)}
-                                disabled={probeLoadingTaskId === task.id}
-                              >
-                                {probeLoadingTaskId === task.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                                现场拨测
-                              </button>
-                              <IconButton
-                                title="编辑"
-                                onClick={() => {
-                                  setEditingTask(task);
-                                  setIsTaskModalOpen(true);
-                                }}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </IconButton>
-                              <IconButton title="删除" onClick={() => void handleDeleteTask(task)}>
-                                <Trash2 className="h-4 w-4" />
-                              </IconButton>
-                            </div>
+                            {isAdmin ? (
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  className="flex items-center gap-1 rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+                                  onClick={() => void handleToggleTask(task)}
+                                >
+                                  {task.status === 'running' ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+                                  {task.status === 'running' ? '暂停' : '恢复'}
+                                </button>
+                                <button
+                                  className="flex items-center gap-1 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:opacity-70"
+                                  onClick={() => void handleManualProbe(task)}
+                                  disabled={probeLoadingTaskId === task.id}
+                                >
+                                  {probeLoadingTaskId === task.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                                  现场拨测
+                                </button>
+                                <IconButton
+                                  title="编辑"
+                                  onClick={() => {
+                                    setEditingTask(task);
+                                    setIsTaskModalOpen(true);
+                                  }}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </IconButton>
+                                <IconButton title="删除" onClick={() => void handleDeleteTask(task)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </IconButton>
+                              </div>
+                            ) : null}
                           </div>
 
                           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -783,39 +899,38 @@ export default function App() {
                 <section className="space-y-6">
                   <PageHeader title="时序测试日志" description="查看主动拨测原始日志，支持按渠道、状态和时间窗口过滤。" />
                   <div className="grid gap-3 rounded-[24px] border border-gray-100 bg-white p-4 shadow-xs lg:grid-cols-4">
-                    <select
+                    <AppSelect
                       value={logsFilterChannel}
-                      onChange={(event) => setLogsFilterChannel(event.target.value)}
-                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none"
-                    >
-                      <option value="">所有渠道</option>
-                      {channels.map((channel) => (
-                        <option key={channel.id} value={channel.id}>
-                          {channel.name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
+                      onChange={setLogsFilterChannel}
+                      options={[
+                        { value: '', label: '所有渠道' },
+                        ...channels.map((channel) => ({ value: channel.id, label: channel.name })),
+                      ]}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    />
+                    <AppSelect
                       value={logsFilterStatus}
-                      onChange={(event) => setLogsFilterStatus(event.target.value as typeof logsFilterStatus)}
-                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none"
-                    >
-                      <option value="all">全部状态</option>
-                      <option value="success">成功</option>
-                      <option value="fail">失败</option>
-                      <option value="violation">Violation</option>
-                    </select>
-                    <select
+                      onChange={setLogsFilterStatus}
+                      options={[
+                        { value: 'all', label: '全部状态' },
+                        { value: 'success', label: '成功' },
+                        { value: 'fail', label: '失败' },
+                        { value: 'violation', label: 'Violation' },
+                      ]}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    />
+                    <AppSelect
                       value={logsFilterTimeRange}
-                      onChange={(event) => setLogsFilterTimeRange(event.target.value as typeof logsFilterTimeRange)}
-                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm outline-none"
-                    >
-                      <option value="all">全量</option>
-                      <option value="1h">近 1 小时</option>
-                      <option value="6h">近 6 小时</option>
-                      <option value="24h">近 24 小时</option>
-                      <option value="7d">近 7 天</option>
-                    </select>
+                      onChange={setLogsFilterTimeRange}
+                      options={[
+                        { value: 'all', label: '全量' },
+                        { value: '1h', label: '近 1 小时' },
+                        { value: '6h', label: '近 6 小时' },
+                        { value: '24h', label: '近 24 小时' },
+                        { value: '7d', label: '近 7 天' },
+                      ]}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                    />
                     <button
                       className="flex items-center justify-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-600 transition hover:bg-gray-50"
                       onClick={() => {
@@ -884,11 +999,11 @@ export default function App() {
                   <PageHeader
                     title="联动告警终端"
                     description="维护飞书、钉钉、Webhook、Email 告警通道，并查看当前告警事件。"
-                    actionLabel="新增告警通道"
-                    onAction={() => {
+                    actionLabel={isAdmin ? '新增告警通道' : undefined}
+                    onAction={isAdmin ? () => {
                       setEditingAlert(null);
                       setIsAlertModalOpen(true);
-                    }}
+                    } : undefined}
                   />
 
                   <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -909,26 +1024,28 @@ export default function App() {
                                 {alert.webhookUrl}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1">
-                              <button
-                                className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
-                                onClick={() => void handleTestAlertConnection(alert)}
-                              >
-                                测试
-                              </button>
-                              <IconButton
-                                title="编辑"
-                                onClick={() => {
-                                  setEditingAlert(alert);
-                                  setIsAlertModalOpen(true);
-                                }}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </IconButton>
-                              <IconButton title="删除" onClick={() => void handleDeleteAlert(alert)}>
-                                <Trash2 className="h-4 w-4" />
-                              </IconButton>
-                            </div>
+                            {isAdmin ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+                                  onClick={() => void handleTestAlertConnection(alert)}
+                                >
+                                  测试
+                                </button>
+                                <IconButton
+                                  title="编辑"
+                                  onClick={() => {
+                                    setEditingAlert(alert);
+                                    setIsAlertModalOpen(true);
+                                  }}
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </IconButton>
+                                <IconButton title="删除" onClick={() => void handleDeleteAlert(alert)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </IconButton>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                       ))}
@@ -961,7 +1078,7 @@ export default function App() {
                                 </div>
                                 <div className="mt-2 text-[11px] text-gray-400">{formatBeijingTime(notification.timestamp)}</div>
                               </div>
-                              {notification.status === 'firing' ? (
+                              {notification.status === 'firing' && isAdmin ? (
                                 <button
                                   className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-white"
                                   onClick={() => void handleResolveNotification(notification)}
@@ -969,7 +1086,9 @@ export default function App() {
                                   标记恢复
                                 </button>
                               ) : (
-                                <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700">RESOLVED</span>
+                                <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${notification.status === 'firing' ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                                  {notification.status === 'firing' ? '只读查看' : 'RESOLVED'}
+                                </span>
                               )}
                             </div>
                           </div>
@@ -983,7 +1102,28 @@ export default function App() {
               {activeTab === 'report' ? (
                 <section className="space-y-6">
                   <PageHeader title="SLA 合规审计" description="基于已落库拨测数据生成周期性合规视图与导出内容。" />
-                  <AuditReport logs={logs} channels={channels} tasks={tasks} onTriggerNotify={(msg) => addToast('报表操作', msg, 'info')} />
+                  <AuditReport
+                    logs={logs}
+                    channels={channels}
+                    tasks={tasks}
+                    canManage={isAdmin}
+                    onTriggerNotify={(msg) => addToast('报表操作', msg, 'info')}
+                  />
+                </section>
+              ) : null}
+
+              {activeTab === 'users' && isAdmin ? (
+                <section className="space-y-6">
+                  <PageHeader title="账号管理" description="维护管理员与普通用户账号，支持重置密码、启停账号和删除账号。" />
+                  <UserManagementPanel
+                    users={managedUsers}
+                    currentUserId={user.id}
+                    isLoading={loadingUsers}
+                    onCreateUser={handleCreateUser}
+                    onToggleUserStatus={handleToggleUserStatus}
+                    onResetPassword={handleResetUserPassword}
+                    onDeleteUser={handleDeleteUser}
+                  />
                 </section>
               ) : null}
             </main>
@@ -1024,6 +1164,26 @@ export default function App() {
         associatedTask={selectedDiagnosticLog ? tasks.find((task) => task.id === selectedDiagnosticLog.taskId) : undefined}
         allLogs={logs}
       />
+      <ConfirmDialog
+        isOpen={Boolean(pendingConfirmation)}
+        title="确认执行该操作"
+        message={
+          pendingConfirmation?.kind === 'channel'
+            ? `确认删除模型渠道「${pendingConfirmation.name}」？该操作会移除其关联任务。`
+            : pendingConfirmation?.kind === 'task'
+              ? `确认删除拨测策略「${pendingConfirmation.name}」？该操作会将其从调度器移除。`
+              : pendingConfirmation?.kind === 'alert'
+                ? `确认删除告警通道「${pendingConfirmation.name}」？`
+                : pendingConfirmation?.kind === 'user'
+                  ? `确认删除账号「${pendingConfirmation.name}」？删除后该账号将无法再登录。`
+                : ''
+        }
+        confirmLabel="确认删除"
+        tone="danger"
+        isSubmitting={confirmSubmitting}
+        onCancel={() => setPendingConfirmation(null)}
+        onConfirm={handleConfirmAction}
+      />
     </div>
   );
 }
@@ -1031,10 +1191,12 @@ export default function App() {
 function SidebarNav({
   activeTab,
   firingCount,
+  isAdmin,
   onChange,
 }: {
   activeTab: ActiveTab;
   firingCount: number;
+  isAdmin: boolean;
   onChange: (tab: ActiveTab) => void;
 }) {
   return (
@@ -1062,6 +1224,15 @@ function SidebarNav({
           <SidebarButton label="SLA 合规审计" icon={<FileText className="h-4 w-4" />} active={activeTab === 'report'} onClick={() => onChange('report')} />
         </ul>
       </div>
+
+      {isAdmin ? (
+        <div className="mt-8">
+          <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-gray-400">系统设置</p>
+          <ul className="space-y-2">
+            <SidebarButton label="账号管理" icon={<UserRound className="h-4 w-4" />} active={activeTab === 'users'} onClick={() => onChange('users')} />
+          </ul>
+        </div>
+      ) : null}
     </>
   );
 }

@@ -1,7 +1,9 @@
 const BEIJING_TIME_ZONE = 'Asia/Shanghai';
 
 function parseDate(value: string | Date): Date {
-  return value instanceof Date ? value : new Date(value);
+  if (value instanceof Date) return value;
+  const hasExplicitTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  return new Date(hasExplicitTimezone ? value : `${value}Z`);
 }
 
 export function formatBeijingTime(value: string | Date): string {

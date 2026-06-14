@@ -129,6 +129,71 @@ def test_change_password_invalidates_existing_session() -> None:
     assert reset.status_code == 200
 
 
+def test_admin_user_management_does_not_expose_plaintext_passwords() -> None:
+    login()
+
+    created = client.post(
+        "/api/auth/users",
+        json={
+            "username": "viewer",
+            "password": "viewer-pass-123",
+            "role": "user",
+            "is_active": True,
+        },
+    )
+    assert created.status_code == 200
+    created_payload = created.json()
+    assert "password" not in created_payload
+
+    users = client.get("/api/auth/users")
+    assert users.status_code == 200
+    users_payload = users.json()
+    assert all("password" not in item for item in users_payload)
+
+    reset = client.post(
+        f"/api/auth/users/{created_payload['id']}/reset-password",
+        json={"new_password": "viewer-pass-456"},
+    )
+    assert reset.status_code == 200
+    assert "password" not in reset.json()
+
+    relogin = client.post("/api/auth/login", json={"username": "viewer", "password": "viewer-pass-456"})
+    assert relogin.status_code == 200
+
+
+def test_admin_can_delete_managed_user_but_not_self() -> None:
+    login()
+
+    created = client.post(
+        "/api/auth/users",
+        json={
+            "username": "temp-user",
+            "password": "temp-pass-123",
+            "role": "user",
+            "is_active": True,
+        },
+    )
+    assert created.status_code == 200
+    created_payload = created.json()
+
+    deleted = client.delete(f"/api/auth/users/{created_payload['id']}")
+    assert deleted.status_code == 200
+    assert deleted.json() == {"ok": True}
+
+    users = client.get("/api/auth/users")
+    assert users.status_code == 200
+    assert all(item["id"] != created_payload["id"] for item in users.json())
+
+    relogin = client.post("/api/auth/login", json={"username": "temp-user", "password": "temp-pass-123"})
+    assert relogin.status_code == 401
+
+    with SessionLocal() as db:
+        admin = db.scalar(select(User).where(User.username == "admin"))
+        assert admin is not None
+        self_delete = client.delete(f"/api/auth/users/{admin.id}")
+    assert self_delete.status_code == 400
+
+
 def test_manual_probe_writes_log_and_creates_incident(monkeypatch) -> None:
     import app.services.probe as probe_service
 

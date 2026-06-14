@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { ModelChannel } from '../types';
 import { X, Cpu, Key, Link2, Tag, Percent } from 'lucide-react';
+import { AppSelect } from './AppSelect';
 
 interface ChannelModalProps {
   isOpen: boolean;
@@ -146,30 +147,32 @@ export function ChannelModal({ isOpen, onClose, onSave, channel }: ChannelModalP
             {/* Provider Type */}
             <div className="col-span-2 sm:col-span-1">
               <label className="block text-xs font-semibold text-gray-700 mb-1">端点接口协议规范 *</label>
-              <select
+              <AppSelect
                 value={type}
-                onChange={e => handleTypeChange(e.target.value as any)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand focus:border-brand outline-none bg-white"
-              >
-                <option value="openai">OpenAI 兼容规范 (/v1/chat/completions)</option>
-                <option value="ollama">Ollama 接口规范 (/api/chat)</option>
-                <option value="huggingface">Hugging Face 推理 API</option>
-                <option value="custom">Custom / 自定义私有流式协议</option>
-              </select>
+                onChange={handleTypeChange}
+                options={[
+                  { value: 'openai', label: 'OpenAI 兼容规范 (/v1/chat/completions)' },
+                  { value: 'ollama', label: 'Ollama 接口规范 (/api/chat)' },
+                  { value: 'huggingface', label: 'Hugging Face 推理 API' },
+                  { value: 'custom', label: 'Custom / 自定义私有流式协议' },
+                ]}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl"
+              />
             </div>
 
             {/* Status */}
             <div className="col-span-2 sm:col-span-1">
               <label className="block text-xs font-semibold text-gray-700 mb-1">当前初始化运行状态</label>
-              <select
+              <AppSelect
                 value={status}
-                onChange={e => setStatus(e.target.value as any)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand focus:border-brand outline-none bg-white"
-              >
-                <option value="active">运行正常 (Active)</option>
-                <option value="degraded">降级波动 (Degraded)</option>
-                <option value="offline">暂时离线 (Offline)</option>
-              </select>
+                onChange={setStatus}
+                options={[
+                  { value: 'active', label: '运行正常 (Active)' },
+                  { value: 'degraded', label: '降级波动 (Degraded)' },
+                  { value: 'offline', label: '暂时离线 (Offline)' },
+                ]}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl"
+              />
             </div>
           </div>
 

@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { AlertConfig } from '../types';
 import { X, Bell, Link2, Mail, Send } from 'lucide-react';
+import { AppSelect } from './AppSelect';
 
 interface AlertConfigModalProps {
   isOpen: boolean;
@@ -120,16 +121,17 @@ export function AlertConfigModal({ isOpen, onClose, onSave, onTestConnection, al
           {/* Type Selector */}
           <div>
             <label className="block text-xs font-semibold text-gray-700 mb-1">推送协议/载体类型 *</label>
-            <select
+            <AppSelect
               value={type}
-              onChange={e => setType(e.target.value as any)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand focus:border-brand outline-none bg-white font-sans"
-            >
-              <option value="feishu">企业飞书群卡片报警 (推荐)</option>
-              <option value="dingtalk">钉钉自定义群机器人推送</option>
-              <option value="webhook">标准 REST Webhook 推送 (JSON)</option>
-              <option value="email">SMTP 电邮通知投递</option>
-            </select>
+              onChange={setType}
+              options={[
+                { value: 'feishu', label: '企业飞书群卡片报警 (推荐)' },
+                { value: 'dingtalk', label: '钉钉自定义群机器人推送' },
+                { value: 'webhook', label: '标准 REST Webhook 推送 (JSON)' },
+                { value: 'email', label: 'SMTP 电邮通知投递' },
+              ]}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl font-sans"
+            />
           </div>
 
           {/* Destination URL */}
@@ -167,14 +169,15 @@ export function AlertConfigModal({ isOpen, onClose, onSave, onTestConnection, al
               <span className="text-xs font-semibold text-gray-700">启用该渠道投放通知</span>
               <p className="text-[10px] text-gray-400">关闭后探测报错将临时挂顿此渠道发送</p>
             </div>
-            <select
+            <AppSelect
               value={status}
-              onChange={e => setStatus(e.target.value as any)}
-              className="px-2.5 py-1 text-xs border border-gray-200 bg-white rounded-lg outline-none font-medium"
-            >
-              <option value="enabled">启用 (Enabled)</option>
-              <option value="disabled">停用 (Disabled)</option>
-            </select>
+              onChange={setStatus}
+              options={[
+                { value: 'enabled', label: '启用 (Enabled)' },
+                { value: 'disabled', label: '停用 (Disabled)' },
+              ]}
+              className="px-2.5 py-1 text-xs border border-gray-200 rounded-lg font-medium"
+            />
           </div>
 
           {/* Test Link connection */}

@@ -9,13 +9,28 @@ from app.models.auth import User
 
 
 def bootstrap_admin_user(db: Session, settings: Settings) -> None:
+    admin = db.scalar(select(User).where(User.role == "admin"))
+    if admin:
+        if admin.password_ciphertext:
+            admin.password_ciphertext = None
+            db.commit()
+        return
     user = db.scalar(select(User).limit(1))
-    if user or not settings.admin_username or not settings.admin_password:
+    if user:
+        if not user.role:
+            user.role = "admin"
+        if user.password_ciphertext:
+            user.password_ciphertext = None
+        db.commit()
+        return
+    if not settings.admin_username or not settings.admin_password:
         return
     db.add(
         User(
             username=settings.admin_username,
             password_hash=hash_password(settings.admin_password),
+            password_ciphertext=None,
+            role="admin",
             is_active=True,
         )
     )

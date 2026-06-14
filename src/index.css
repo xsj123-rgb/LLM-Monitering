@@ -10,7 +10,58 @@
   --color-secondary: #4b5563;
 }
 
+:root {
+  color-scheme: light;
+}
+
+html,
 body {
+  color-scheme: light;
   background-color: #f3f4f6;
   color: #1f2937;
+}
+
+.app-select {
+  color-scheme: light;
+  appearance: none;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 20 20' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5.5 7.75L10 12.25L14.5 7.75' stroke='%2364758B' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 0.95rem center;
+  background-repeat: no-repeat;
+  background-size: 1rem 1rem;
+  padding-right: 2.75rem;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+select,
+option,
+optgroup {
+  color-scheme: light;
+}
+
+.app-select:hover {
+  border-color: #cbd5e1;
+  background-color: #ffffff;
+}
+
+.app-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  outline: none;
+}
+
+.app-select option {
+  background-color: #ffffff;
+  color: #0f172a;
+}
+
+.login-password-input::-ms-reveal,
+.login-password-input::-ms-clear {
+  display: none;
+}
+
+.login-password-input::-webkit-credentials-auto-fill-button,
+.login-password-input::-webkit-textfield-decoration-container {
+  visibility: hidden;
+  pointer-events: none;
 }

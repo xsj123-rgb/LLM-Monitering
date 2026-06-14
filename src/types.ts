@@ -118,10 +118,16 @@ export interface ReportPushResult {
 export interface AuthUser {
   id: string;
   username: string;
+  role: 'admin' | 'user';
   is_active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+  last_login_at?: string | null;
 }
 
 export interface AuthStatus {
   authenticated: boolean;
   user: AuthUser | null;
 }
+
+export interface ManagedUser extends AuthUser {}

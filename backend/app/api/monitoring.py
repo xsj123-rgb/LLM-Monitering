@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.orm import selectinload
 
-from app.dependencies import CurrentUser, DBSession
+from app.dependencies import CurrentAdminUser, CurrentUser, DBSession
 from app.models.alert import AlertEndpoint, AlertIncident
 from app.models.monitoring import ModelChannel, ProbeRun, ProbeTask
 from app.schemas.monitoring import (
@@ -117,7 +117,7 @@ def list_channels(db: DBSession, _: CurrentUser):
 
 
 @router.post("/channels", response_model=ModelChannelResponse)
-def create_channel(payload: ModelChannelCreate, db: DBSession, _: CurrentUser):
+def create_channel(payload: ModelChannelCreate, db: DBSession, _: CurrentAdminUser):
     channel = ModelChannel()
     apply_channel_payload(channel, payload.model_dump())
     db.add(channel)
@@ -127,7 +127,7 @@ def create_channel(payload: ModelChannelCreate, db: DBSession, _: CurrentUser):
 
 
 @router.patch("/channels/{channel_id}", response_model=ModelChannelResponse)
-def update_channel(channel_id: str, payload: ModelChannelUpdate, db: DBSession, _: CurrentUser):
+def update_channel(channel_id: str, payload: ModelChannelUpdate, db: DBSession, _: CurrentAdminUser):
     channel = db.get(ModelChannel, channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -138,7 +138,7 @@ def update_channel(channel_id: str, payload: ModelChannelUpdate, db: DBSession, 
 
 
 @router.delete("/channels/{channel_id}")
-def delete_channel(channel_id: str, db: DBSession, _: CurrentUser):
+def delete_channel(channel_id: str, db: DBSession, _: CurrentAdminUser):
     channel = db.get(ModelChannel, channel_id)
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -154,7 +154,7 @@ def list_tasks(db: DBSession, _: CurrentUser):
 
 
 @router.post("/tasks", response_model=DialTaskResponse)
-async def create_task(payload: DialTaskCreate, db: DBSession, _: CurrentUser):
+async def create_task(payload: DialTaskCreate, db: DBSession, _: CurrentAdminUser):
     if not db.get(ModelChannel, payload.channelId):
         raise HTTPException(status_code=400, detail="Associated channel does not exist")
     task = ProbeTask()
@@ -170,7 +170,7 @@ async def create_task(payload: DialTaskCreate, db: DBSession, _: CurrentUser):
 
 
 @router.patch("/tasks/{task_id}", response_model=DialTaskResponse)
-async def update_task(task_id: str, payload: DialTaskUpdate, db: DBSession, _: CurrentUser):
+async def update_task(task_id: str, payload: DialTaskUpdate, db: DBSession, _: CurrentAdminUser):
     task = db.get(ProbeTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -190,7 +190,7 @@ async def update_task(task_id: str, payload: DialTaskUpdate, db: DBSession, _: C
 
 
 @router.delete("/tasks/{task_id}")
-async def delete_task(task_id: str, db: DBSession, _: CurrentUser):
+async def delete_task(task_id: str, db: DBSession, _: CurrentAdminUser):
     task = db.get(ProbeTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -202,7 +202,7 @@ async def delete_task(task_id: str, db: DBSession, _: CurrentUser):
 
 
 @router.post("/tasks/{task_id}/probe", response_model=MetricLogResponse)
-async def trigger_manual_probe(task_id: str, db: DBSession, _: CurrentUser):
+async def trigger_manual_probe(task_id: str, db: DBSession, _: CurrentAdminUser):
     task = db.get(ProbeTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -217,7 +217,7 @@ def list_alerts(db: DBSession, _: CurrentUser):
 
 
 @router.post("/alerts", response_model=AlertConfigResponse)
-def create_alert(payload: AlertConfigCreate, db: DBSession, _: CurrentUser):
+def create_alert(payload: AlertConfigCreate, db: DBSession, _: CurrentAdminUser):
     alert = AlertEndpoint()
     apply_alert_payload(alert, payload.model_dump())
     db.add(alert)
@@ -227,7 +227,7 @@ def create_alert(payload: AlertConfigCreate, db: DBSession, _: CurrentUser):
 
 
 @router.patch("/alerts/{alert_id}", response_model=AlertConfigResponse)
-def update_alert(alert_id: str, payload: AlertConfigUpdate, db: DBSession, _: CurrentUser):
+def update_alert(alert_id: str, payload: AlertConfigUpdate, db: DBSession, _: CurrentAdminUser):
     alert = db.get(AlertEndpoint, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert endpoint not found")
@@ -238,7 +238,7 @@ def update_alert(alert_id: str, payload: AlertConfigUpdate, db: DBSession, _: Cu
 
 
 @router.delete("/alerts/{alert_id}")
-def delete_alert(alert_id: str, db: DBSession, _: CurrentUser):
+def delete_alert(alert_id: str, db: DBSession, _: CurrentAdminUser):
     alert = db.get(AlertEndpoint, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert endpoint not found")
@@ -252,7 +252,7 @@ def delete_alert(alert_id: str, db: DBSession, _: CurrentUser):
 
 
 @router.post("/alerts/{alert_id}/test")
-async def test_alert(alert_id: str, db: DBSession, _: CurrentUser):
+async def test_alert(alert_id: str, db: DBSession, _: CurrentAdminUser):
     alert = db.get(AlertEndpoint, alert_id)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert endpoint not found")
@@ -300,7 +300,7 @@ def list_notifications(db: DBSession, _: CurrentUser):
 
 
 @router.patch("/notifications/{notification_id}", response_model=AlertNotificationResponse)
-def resolve_notification(notification_id: str, db: DBSession, _: CurrentUser):
+def resolve_notification(notification_id: str, db: DBSession, _: CurrentAdminUser):
     incident = db.get(AlertIncident, notification_id)
     if not incident:
         raise HTTPException(status_code=404, detail="Notification not found")
@@ -358,7 +358,7 @@ def dashboard_series(db: DBSession, _: CurrentUser, channel_id: str | None = Non
 @router.get("/reports/summary", response_model=ReportSummaryResponse)
 def report_summary(
     db: DBSession,
-    _: CurrentUser,
+    _: CurrentAdminUser,
     period: Literal["daily", "weekly", "monthly"] = "weekly",
 ):
     return _build_report_summary_payload(db, period)

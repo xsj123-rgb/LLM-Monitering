@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { DialTask, ModelChannel, AlertConfig } from '../types';
 import { X, Play, Clock, ShieldAlert, Wifi, MessageSquareCode } from 'lucide-react';
 import { DUMMY_DIAL_PROMPTS } from '../data/mockData';
+import { AppSelect } from './AppSelect';
 
 interface TaskModalProps {
   isOpen: boolean;
@@ -130,19 +131,15 @@ export function TaskModal({ isOpen, onClose, onSave, task, channels, alerts }: T
             {/* Target Channel */}
             <div className="col-span-2 sm:col-span-1">
               <label className="block text-xs font-semibold text-gray-700 mb-1">关联被测大模型通道 *</label>
-              <select
+              <AppSelect
                 value={channelId}
-                onChange={e => setChannelId(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand focus:border-brand outline-none bg-white"
-                required
-              >
-                <option value="">-- 请选择受监控的渠道 --</option>
-                {channels.map(ch => (
-                  <option key={ch.id} value={ch.id}>
-                    {ch.name} ({ch.modelIdentifier})
-                  </option>
-                ))}
-              </select>
+                onChange={setChannelId}
+                options={[
+                  { value: '', label: '-- 请选择受监控的渠道 --' },
+                  ...channels.map(ch => ({ value: ch.id, label: `${ch.name} (${ch.modelIdentifier})` })),
+                ]}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl"
+              />
             </div>
           </div>
 
@@ -182,17 +179,18 @@ export function TaskModal({ isOpen, onClose, onSave, task, channels, alerts }: T
               <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1">
                 <Clock className="w-3.5 h-3.5 text-gray-400" /> 探测执行频次间隔 *
               </label>
-              <select
+              <AppSelect
                 value={intervalMinutes}
-                onChange={e => setIntervalMinutes(Number(e.target.value))}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand focus:border-brand outline-none bg-white"
-              >
-                <option value={1}>每 1 分钟 (极高频可用性验证)</option>
-                <option value={5}>每 5 分钟 (生产级别推荐)</option>
-                <option value={10}>每 10 分钟 (标准轮询)</option>
-                <option value={30}>每 30 分钟 (稀疏拨测)</option>
-                <option value={60}>每 60 分钟 (基本巡检)</option>
-              </select>
+                onChange={setIntervalMinutes}
+                options={[
+                  { value: 1, label: '每 1 分钟 (极高频可用性验证)' },
+                  { value: 5, label: '每 5 分钟 (生产级别推荐)' },
+                  { value: 10, label: '每 10 分钟 (标准轮询)' },
+                  { value: 30, label: '每 30 分钟 (稀疏拨测)' },
+                  { value: 60, label: '每 60 分钟 (基本巡检)' },
+                ]}
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl"
+              />
             </div>
 
             {/* Concurrency */}

@@ -19,6 +19,14 @@ from app.core.security import (
 from app.models.auth import User, UserSession
 
 
+def is_admin_user(user: User) -> bool:
+    return user.role == "admin"
+
+
+def require_admin_user(user: User) -> bool:
+    return is_admin_user(user)
+
+
 def authenticate_user(db: Session, username: str, password: str) -> User | None:
     user = db.scalar(select(User).where(User.username == username))
     if not user or not user.is_active:
@@ -138,5 +146,54 @@ def change_password(db: Session, user: User, current_password: str, new_password
     if not verify_password(current_password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
     user.password_hash = hash_password(new_password)
+    user.password_ciphertext = None
     db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+    db.commit()
+
+
+def create_user(
+    db: Session,
+    *,
+    username: str,
+    password: str,
+    role: str = "user",
+    is_active: bool = True,
+) -> User:
+    existing = db.scalar(select(User).where(User.username == username))
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        password_ciphertext=None,
+        role=role,
+        is_active=is_active,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_user_status(db: Session, *, user: User, is_active: bool) -> User:
+    user.is_active = is_active
+    if not is_active:
+        db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def admin_reset_password(db: Session, *, user: User, new_password: str) -> User:
+    user.password_hash = hash_password(new_password)
+    user.password_ciphertext = None
+    db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def delete_user(db: Session, *, user: User) -> None:
+    db.execute(delete(UserSession).where(UserSession.user_id == user.id))
+    db.delete(user)
     db.commit()

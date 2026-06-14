@@ -56,9 +56,6 @@ export function LoginPage({ onSubmit, isSubmitting, error }: LoginPageProps) {
                       <div className="text-[11px] font-semibold uppercase tracking-[0.34em] text-blue-600">Enterprise Console</div>
                     </div>
                   </div>
-                  <span className="rounded-full border border-blue-200 bg-white/90 px-3 py-1 text-[11px] font-semibold text-blue-700">
-                    本地管理员模式
-                  </span>
                 </div>
 
                 <div className="grid flex-1 content-center gap-5">
@@ -116,10 +113,6 @@ export function LoginPage({ onSubmit, isSubmitting, error }: LoginPageProps) {
                   </div>
 
                   <div className="mb-7 space-y-3">
-                    <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold text-slate-600">
-                      <ShieldCheck className="h-3.5 w-3.5 text-blue-600" />
-                      管理员安全登录
-                    </div>
                     <h2 className="font-display text-3xl font-bold text-slate-900">进入值守控制台</h2>
                     <p className="text-sm leading-6 text-slate-500">
                       登录后即可查看拨测结果、告警事件流与 SLA 审计。
@@ -136,7 +129,7 @@ export function LoginPage({ onSubmit, isSubmitting, error }: LoginPageProps) {
                           value={username}
                           onChange={(event) => setUsername(event.target.value)}
                           className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
-                          placeholder="请输入管理员用户名"
+                          placeholder="请输入用户名"
                           autoComplete="username"
                         />
                       </div>
@@ -152,7 +145,7 @@ export function LoginPage({ onSubmit, isSubmitting, error }: LoginPageProps) {
                           type={isPasswordVisible ? 'text' : 'password'}
                           value={password}
                           onChange={(event) => setPassword(event.target.value)}
-                          className="w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+                          className="login-password-input w-full bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
                           placeholder="请输入密码"
                           autoComplete="current-password"
                         />

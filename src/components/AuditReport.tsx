@@ -13,10 +13,11 @@ interface AuditReportProps {
   logs: MetricLog[];
   channels: ModelChannel[];
   tasks: DialTask[];
+  canManage?: boolean;
   onTriggerNotify: (msg: string) => void;
 }
 
-export function AuditReport({ logs, channels, tasks, onTriggerNotify }: AuditReportProps) {
+export function AuditReport({ logs, channels, tasks, canManage = true, onTriggerNotify }: AuditReportProps) {
   const [reportPeriod, setReportPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [triggerSending, setTriggerSending] = useState(false);
 
@@ -596,14 +597,16 @@ export function AuditReport({ logs, channels, tasks, onTriggerNotify }: AuditRep
             <p className="text-[10px] text-gray-400 font-sans">大模型部署服务器稳定性度量细化评估，依据实际拨测统计生成。</p>
           </div>
 
-          <button
-            onClick={handleTriggerSendReport}
-            disabled={triggerSending}
-            className="px-4 py-1.5 text-xs text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-all font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-55 font-sans"
-          >
-            <Send className="w-3.5 h-3.5 animate-pulse" />
-            <span>{triggerSending ? '投递中...' : '一键推送本期报告'}</span>
-          </button>
+          {canManage ? (
+            <button
+              onClick={handleTriggerSendReport}
+              disabled={triggerSending}
+              className="px-4 py-1.5 text-xs text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-all font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-55 font-sans"
+            >
+              <Send className="w-3.5 h-3.5 animate-pulse" />
+              <span>{triggerSending ? '投递中...' : '一键推送本期报告'}</span>
+            </button>
+          ) : null}
         </div>
 
         {/* Breakdown Row items */}

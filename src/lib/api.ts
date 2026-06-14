@@ -3,6 +3,7 @@ import type {
   AlertNotification,
   AuthStatus,
   DialTask,
+  ManagedUser,
   MetricLog,
   ModelChannel,
   ReportPushResult,
@@ -63,6 +64,26 @@ export const api = {
       request<{ ok: boolean }>('/api/auth/change-password', {
         method: 'POST',
         body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      }),
+    listUsers: () => request<ManagedUser[]>('/api/auth/users'),
+    createUser: (payload: { username: string; password: string; role: 'admin' | 'user'; is_active: boolean }) =>
+      request<ManagedUser>('/api/auth/users', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    updateUser: (id: string, payload: { is_active?: boolean }) =>
+      request<ManagedUser>(`/api/auth/users/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      }),
+    deleteUser: (id: string) =>
+      request<{ ok: boolean }>(`/api/auth/users/${id}`, {
+        method: 'DELETE',
+      }),
+    resetUserPassword: (id: string, newPassword: string) =>
+      request<ManagedUser>(`/api/auth/users/${id}/reset-password`, {
+        method: 'POST',
+        body: JSON.stringify({ new_password: newPassword }),
       }),
   },
   channels: {
