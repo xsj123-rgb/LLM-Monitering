@@ -105,6 +105,16 @@ export interface AlertNotification {
   alertChannelName: string;
 }
 
+export interface ReportPushResult {
+  period: 'daily' | 'weekly' | 'monthly';
+  deliveredCount: number;
+  failedCount: number;
+  endpointNames: string[];
+  errors: string[];
+  attachmentSent: boolean;
+  attachmentMessage?: string | null;
+}
+
 export interface AuthUser {
   id: string;
   username: string;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from collections.abc import Awaitable, Callable
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -47,9 +48,15 @@ class ProbeScheduler:
                     self._register_task(task)
 
     def _register_task(self, task: ProbeTask) -> None:
+        if task.next_run_at is None:
+            start_date = datetime.now(UTC)
+        elif task.next_run_at.tzinfo is None:
+            start_date = task.next_run_at.replace(tzinfo=UTC)
+        else:
+            start_date = task.next_run_at.astimezone(UTC)
         self._scheduler.add_job(
             self._run_task_job,
-            IntervalTrigger(minutes=task.interval_minutes),
+            IntervalTrigger(minutes=task.interval_minutes, start_date=start_date),
             id=f"probe-task:{task.id}",
             kwargs={"task_id": task.id},
             replace_existing=True,

@@ -25,9 +25,10 @@ from app.schemas.monitoring import (
     ModelChannelResponse,
     ModelChannelUpdate,
     ReportChannelSummary,
+    ReportPushResponse,
     ReportSummaryResponse,
 )
-from app.services.notifier import send_test_alert
+from app.services.notifier import build_report_pdf_bytes, send_feishu_report_pdf, send_report_alerts, send_test_alert
 from app.services.probe import execute_probe_task
 from app.services.serialization import (
     apply_alert_payload,
@@ -40,9 +41,73 @@ from app.services.serialization import (
     serialize_task,
 )
 from app.services.time import as_beijing_time
-from app.state import scheduler
+import app.state as app_state
 
 router = APIRouter(prefix="/api", tags=["monitoring"])
+
+
+async def _run_immediate_probe_for_running_task(db: DBSession, task: ProbeTask) -> None:
+    if task.status != "running":
+        return
+    await execute_probe_task(db, task, trigger="scheduled", concurrency_override=1)
+    db.refresh(task)
+
+
+def _build_report_summary_payload(db: DBSession, period: Literal["daily", "weekly", "monthly"]) -> ReportSummaryResponse:
+    now = datetime.utcnow()
+    delta = {"daily": timedelta(days=1), "weekly": timedelta(days=7), "monthly": timedelta(days=30)}[period]
+    logs = list(db.scalars(select(ProbeRun).where(ProbeRun.timestamp >= now - delta)))
+    total = len(logs)
+    success_logs = [log for log in logs if log.success]
+    success_rate = round((len(success_logs) / total) * 100, 2) if total else 100.0
+    channels = list(db.scalars(select(ModelChannel)))
+
+    channel_rows: list[ReportChannelSummary] = []
+    for channel in channels:
+        channel_logs = [log for log in logs if log.channel_id == channel.id]
+        success_channel_logs = [log for log in channel_logs if log.success]
+        compliant = [
+            log
+            for log in channel_logs
+            if log.success and not log.violated_ttft and not log.violated_tps and not log.violated_ext_latency
+        ]
+        total_channel = len(channel_logs)
+        avg_ttft = round(sum(log.ttft_ms for log in success_channel_logs) / len(success_channel_logs)) if success_channel_logs else 0
+        avg_tps = round(sum(log.tps for log in success_channel_logs) / len(success_channel_logs), 2) if success_channel_logs else 0.0
+        avg_itl = (
+            round(
+                sum((max(log.total_latency_ms - log.ttft_ms, 0) / max(log.tokens_count - 1, 1)) for log in success_channel_logs)
+                / len(success_channel_logs),
+                2,
+            )
+            if success_channel_logs
+            else 0.0
+        )
+        worst_ttft = max((log.ttft_ms for log in success_channel_logs), default=0)
+        channel_rows.append(
+            ReportChannelSummary(
+                channelId=channel.id,
+                channelName=channel.name,
+                total=total_channel,
+                successRate=round((len(success_channel_logs) / total_channel) * 100, 2) if total_channel else 100.0,
+                complianceRate=round((len(compliant) / total_channel) * 100, 2) if total_channel else 100.0,
+                avgTtft=avg_ttft,
+                avgTps=avg_tps,
+                avgItl=avg_itl,
+                worstTtft=worst_ttft,
+            )
+        )
+    overall_sla = round(
+        sum(channel.complianceRate for channel in channel_rows) / len(channel_rows),
+        2,
+    ) if channel_rows else 100.0
+    return ReportSummaryResponse(
+        period=period,
+        totalDials=total,
+        successRate=success_rate,
+        overallSlaScore=overall_sla,
+        channels=channel_rows,
+    )
 
 
 @router.get("/channels", response_model=list[ModelChannelResponse])
@@ -97,8 +162,10 @@ async def create_task(payload: DialTaskCreate, db: DBSession, _: CurrentUser):
     db.add(task)
     db.commit()
     db.refresh(task)
-    if scheduler:
-        await scheduler.sync_task(task.id)
+    await _run_immediate_probe_for_running_task(db, task)
+    if app_state.scheduler:
+        await app_state.scheduler.sync_task(task.id)
+    db.refresh(task)
     return serialize_task(task)
 
 
@@ -107,11 +174,18 @@ async def update_task(task_id: str, payload: DialTaskUpdate, db: DBSession, _: C
     task = db.get(ProbeTask, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    apply_task_payload(task, payload.model_dump(exclude_unset=True))
+    updates = payload.model_dump(exclude_unset=True)
+    previous_status = task.status
+    apply_task_payload(task, updates)
     db.commit()
     db.refresh(task)
-    if scheduler:
-        await scheduler.sync_task(task.id)
+    has_non_status_updates = any(key != "status" for key in updates)
+    should_run_immediately = task.status == "running" and (previous_status != "running" or has_non_status_updates)
+    if should_run_immediately:
+        await _run_immediate_probe_for_running_task(db, task)
+    if app_state.scheduler:
+        await app_state.scheduler.sync_task(task.id)
+    db.refresh(task)
     return serialize_task(task)
 
 
@@ -122,8 +196,8 @@ async def delete_task(task_id: str, db: DBSession, _: CurrentUser):
         raise HTTPException(status_code=404, detail="Task not found")
     db.delete(task)
     db.commit()
-    if scheduler:
-        await scheduler.sync_task(task_id)
+    if app_state.scheduler:
+        await app_state.scheduler.sync_task(task_id)
     return {"ok": True}
 
 
@@ -287,57 +361,65 @@ def report_summary(
     _: CurrentUser,
     period: Literal["daily", "weekly", "monthly"] = "weekly",
 ):
-    now = datetime.utcnow()
-    delta = {"daily": timedelta(days=1), "weekly": timedelta(days=7), "monthly": timedelta(days=30)}[period]
-    logs = list(db.scalars(select(ProbeRun).where(ProbeRun.timestamp >= now - delta)))
-    total = len(logs)
-    success_logs = [log for log in logs if log.success]
-    success_rate = round((len(success_logs) / total) * 100, 2) if total else 100.0
-    channels = list(db.scalars(select(ModelChannel)))
+    return _build_report_summary_payload(db, period)
 
-    channel_rows: list[ReportChannelSummary] = []
-    for channel in channels:
-        channel_logs = [log for log in logs if log.channel_id == channel.id]
-        success_channel_logs = [log for log in channel_logs if log.success]
-        compliant = [
-            log
-            for log in channel_logs
-            if log.success and not log.violated_ttft and not log.violated_tps and not log.violated_ext_latency
-        ]
-        total_channel = len(channel_logs)
-        avg_ttft = round(sum(log.ttft_ms for log in success_channel_logs) / len(success_channel_logs)) if success_channel_logs else 0
-        avg_tps = round(sum(log.tps for log in success_channel_logs) / len(success_channel_logs), 2) if success_channel_logs else 0.0
-        avg_itl = (
-            round(
-                sum((max(log.total_latency_ms - log.ttft_ms, 0) / max(log.tokens_count - 1, 1)) for log in success_channel_logs)
-                / len(success_channel_logs),
-                2,
-            )
-            if success_channel_logs
-            else 0.0
-        )
-        worst_ttft = max((log.ttft_ms for log in success_channel_logs), default=0)
-        channel_rows.append(
-            ReportChannelSummary(
-                channelId=channel.id,
-                channelName=channel.name,
-                total=total_channel,
-                successRate=round((len(success_channel_logs) / total_channel) * 100, 2) if total_channel else 100.0,
-                complianceRate=round((len(compliant) / total_channel) * 100, 2) if total_channel else 100.0,
-                avgTtft=avg_ttft,
-                avgTps=avg_tps,
-                avgItl=avg_itl,
-                worstTtft=worst_ttft,
+
+@router.post("/reports/push", response_model=ReportPushResponse)
+async def push_report(
+    db: DBSession,
+    _: CurrentUser,
+    period: Literal["daily", "weekly", "monthly"] = "weekly",
+):
+    endpoints = list(
+        db.scalars(
+            select(AlertEndpoint).where(
+                AlertEndpoint.status == "enabled",
+                AlertEndpoint.type == "feishu",
             )
         )
-    overall_sla = round(
-        sum(channel.complianceRate for channel in channel_rows) / len(channel_rows),
-        2,
-    ) if channel_rows else 100.0
-    return ReportSummaryResponse(
+    )
+    if not endpoints:
+        raise HTTPException(status_code=400, detail="未找到已启用的飞书告警通道，请先在联动告警终端中配置。")
+
+    summary = _build_report_summary_payload(db, period)
+    weakest_channels = sorted(summary.channels, key=lambda item: item.complianceRate)[:3]
+    period_labels = {"daily": "日报", "weekly": "周报", "monthly": "月报"}
+    payload = {
+        "kind": "report",
+        "periodLabel": period_labels[period],
+        "timestamp": as_beijing_time(datetime.utcnow()).strftime("%Y-%m-%d %H:%M:%S"),
+        "summary": (
+            f"本期 SLA {period_labels[period]}已生成。综合 SLA 达标率 {summary.overallSlaScore:.2f}%，"
+            f"成功率 {summary.successRate:.2f}%，累计拨测 {summary.totalDials} 次。"
+        ),
+        "totalDials": summary.totalDials,
+        "successRate": summary.successRate,
+        "overallSlaScore": summary.overallSlaScore,
+        "channelCount": len(summary.channels),
+        "weakestChannels": [
+            {
+                "channelName": item.channelName,
+                "complianceRate": item.complianceRate,
+                "successRate": item.successRate,
+            }
+            for item in weakest_channels
+        ],
+    }
+    result = await send_report_alerts(endpoints, payload)
+    if result["deliveredCount"] == 0:
+        raise HTTPException(
+            status_code=502,
+            detail="报告推送失败：" + ("；".join(result["errors"]) if result["errors"] else "未知错误"),
+        )
+    pdf_filename = f"LLM_Guardian_SLA_{period}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.pdf"
+    attachment_sent, attachment_message = await send_feishu_report_pdf(
+        payload=payload,
+        pdf_bytes=build_report_pdf_bytes(payload),
+        filename=pdf_filename,
+    )
+    return ReportPushResponse(
         period=period,
-        totalDials=total,
-        successRate=success_rate,
-        overallSlaScore=overall_sla,
-        channels=channel_rows,
+        attachmentSent=attachment_sent,
+        attachmentMessage=attachment_message,
+        **result,
     )

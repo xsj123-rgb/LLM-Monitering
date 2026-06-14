@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { MetricLog, ModelChannel, DialTask } from '../types';
 import { CalendarRange, ClipboardCheck, ArrowUpRight, Cpu, HelpCircle, HardDrive, ShieldCheck, Send, Printer, Sliders } from 'lucide-react';
 import { formatBeijingTime } from '../lib/time';
+import { api } from '../lib/api';
 
 interface AuditReportProps {
   logs: MetricLog[];
@@ -385,12 +386,25 @@ export function AuditReport({ logs, channels, tasks, onTriggerNotify }: AuditRep
     }
   };
 
-  const handleTriggerSendReport = () => {
+  const handleTriggerSendReport = async () => {
     setTriggerSending(true);
-    setTimeout(() => {
+    try {
+      const result = await api.reports.push(reportPeriod);
+      const periodName = reportPeriod === 'weekly' ? '周报' : reportPeriod === 'daily' ? '日报' : '月报';
+      if (result.failedCount > 0) {
+        onTriggerNotify(
+          `⚠️ 本期 SLA ${periodName}已推送到 ${result.deliveredCount} 个飞书群，另有 ${result.failedCount} 个通道失败。${result.attachmentMessage ? ` ${result.attachmentMessage}` : ''}`
+        );
+      } else {
+        onTriggerNotify(
+          `✅ 本期 SLA ${periodName}已成功推送到 ${result.deliveredCount} 个飞书群。${result.attachmentMessage ? ` ${result.attachmentMessage}` : ''}`
+        );
+      }
+    } catch (error) {
+      onTriggerNotify(`❌ 报告推送失败：${error instanceof Error ? error.message : '未知错误'}`);
+    } finally {
       setTriggerSending(false);
-      onTriggerNotify(`✅ 本期 SLA [${reportPeriod === 'weekly' ? '周报' : reportPeriod === 'daily' ? '日报' : '月报'}] 已成功投递至绑定的飞书 DevOps 报警会话流！`);
-    }, 1200);
+    }
   };
 
   const mostFragileNode = React.useMemo(() => {

@@ -7,15 +7,18 @@ import React from 'react';
 import { MetricLog, DialTask } from '../types';
 import { X, Network, Cpu, Clock, Terminal, CheckCircle2, AlertCircle, FileJson2, ChevronRight } from 'lucide-react';
 import { formatBeijingTimeOnly } from '../lib/time';
+import { formatProbeTrigger, getExecutionIntervalMinutes } from '../lib/logs';
 
 interface LogViewerProps {
   log: MetricLog | null;
   onClose: () => void;
   associatedTask?: DialTask;
+  allLogs?: MetricLog[];
 }
 
-export function LogViewer({ log, onClose, associatedTask }: LogViewerProps) {
+export function LogViewer({ log, onClose, associatedTask, allLogs = [] }: LogViewerProps) {
   if (!log) return null;
+  const executionIntervalMinutes = getExecutionIntervalMinutes(log, allLogs);
 
   // Breakdown values
   const total = Math.max(log.totalLatencyMs, 1);
@@ -99,6 +102,15 @@ export function LogViewer({ log, onClose, associatedTask }: LogViewerProps) {
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-[11px] text-blue-900">
+            <span className="font-semibold">执行上下文：</span>
+            {formatProbeTrigger(log.trigger)}
+            {executionIntervalMinutes ? `，本条日志执行时的调度周期为 ${executionIntervalMinutes} 分钟` : ''}
+            {log.trigger === 'scheduled' && associatedTask && executionIntervalMinutes !== null && executionIntervalMinutes !== associatedTask.intervalMinutes
+              ? '。这通常表示该日志生成于任务频率调整之前。'
+              : ''}
           </div>
 
           {/* SLA Metrics Breakdown (Diagnostic Waterfall) */}

@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     smtp_from: str | None = None
     smtp_use_tls: bool = True
 
+    feishu_app_id: str | None = Field(default=None, alias="FEISHU_APP_ID")
+    feishu_app_secret: str | None = Field(default=None, alias="FEISHU_APP_SECRET")
+    feishu_report_chat_id: str | None = Field(default=None, alias="FEISHU_REPORT_CHAT_ID")
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

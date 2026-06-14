@@ -214,3 +214,13 @@ class ReportSummaryResponse(BaseModel):
     successRate: float
     overallSlaScore: float
     channels: list[ReportChannelSummary]
+
+
+class ReportPushResponse(BaseModel):
+    period: Literal["daily", "weekly", "monthly"]
+    deliveredCount: int
+    failedCount: int
+    endpointNames: list[str]
+    errors: list[str] = Field(default_factory=list)
+    attachmentSent: bool = False
+    attachmentMessage: str | None = None

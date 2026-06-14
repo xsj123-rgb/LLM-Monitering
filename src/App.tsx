@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 
 import { api, ApiError } from './lib/api';
+import { formatProbeTrigger, getExecutionIntervalMinutes } from './lib/logs';
 import { formatBeijingTime } from './lib/time';
 import type {
   AlertConfig,
@@ -248,10 +249,10 @@ export default function App() {
     try {
       if (payload.id) {
         await api.tasks.update(payload.id, payload);
-        addToast('策略已更新', `拨测策略「${payload.name}」已保存。`, 'success');
+        addToast('策略已更新', `拨测策略「${payload.name}」已保存，并已立即执行一次拨测。`, 'success');
       } else {
         await api.tasks.create(payload);
-        addToast('策略已创建', `拨测策略「${payload.name}」已开始运行。`, 'success');
+        addToast('策略已创建', `拨测策略「${payload.name}」已开始运行，并已立即执行首次拨测。`, 'success');
       }
       await loadData();
     } catch (error) {
@@ -273,7 +274,13 @@ export default function App() {
   const handleToggleTask = async (task: DialTask) => {
     try {
       await api.tasks.update(task.id, { status: task.status === 'running' ? 'paused' : 'running' });
-      addToast('策略状态已更新', `「${task.name}」已${task.status === 'running' ? '暂停' : '恢复'}。`, 'info');
+      addToast(
+        '策略状态已更新',
+        task.status === 'running'
+          ? `「${task.name}」已暂停。`
+          : `「${task.name}」已恢复，并已立即执行一次拨测。`,
+        'info'
+      );
       await loadData();
     } catch (error) {
       addToast('状态更新失败', error instanceof Error ? error.message : '未知错误', 'error');
@@ -587,6 +594,7 @@ export default function App() {
                         {recentLogs.length === 0 ? <EmptyBlock label="暂无拨测日志，任务启动后这里会自动出现。" /> : null}
                         {recentLogs.map((log) => {
                           const hasViolation = log.success && (log.violatedTtft || log.violatedTps || log.violatedExtLatency);
+                          const executionIntervalMinutes = getExecutionIntervalMinutes(log, logs);
                           return (
                             <button
                               key={log.id}
@@ -600,6 +608,10 @@ export default function App() {
                                   <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-800">{log.tps} Tok/s</span>
                                 </div>
                                 <div className="mt-1 truncate text-xs text-gray-500">{log.prompt}</div>
+                                <div className="mt-1 text-[10px] text-gray-400">
+                                  {formatProbeTrigger(log.trigger)}
+                                  {executionIntervalMinutes ? ` / 执行时频率 ${executionIntervalMinutes} 分钟` : ''}
+                                </div>
                               </div>
                               <div className="shrink-0 text-right text-[11px] font-mono font-semibold text-gray-800">
                                 <div>首字 {log.ttftMs}ms</div>
@@ -821,6 +833,13 @@ export default function App() {
                     {filteredLogs.length === 0 ? <EmptyBlock label="所选条件下暂无日志。" /> : null}
                     {filteredLogs.map((log) => {
                       const hasViolation = log.success && (log.violatedTtft || log.violatedTps || log.violatedExtLatency);
+                      const executionIntervalMinutes = getExecutionIntervalMinutes(log, logs);
+                      const task = tasks.find((item) => item.id === log.taskId);
+                      const intervalMismatch =
+                        log.trigger === 'scheduled' &&
+                        executionIntervalMinutes !== null &&
+                        task &&
+                        executionIntervalMinutes !== task.intervalMinutes;
                       return (
                         <button
                           key={log.id}
@@ -835,6 +854,17 @@ export default function App() {
                             </div>
                             <div className="mt-2 truncate text-sm text-gray-600">{log.prompt}</div>
                             <div className="mt-2 text-[11px] text-gray-400">{formatBeijingTime(log.timestamp)}</div>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
+                              <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-600">{formatProbeTrigger(log.trigger)}</span>
+                              {executionIntervalMinutes !== null ? (
+                                <span className={`rounded-full px-2 py-0.5 font-medium ${intervalMismatch ? 'bg-amber-50 text-amber-700' : 'bg-blue-50 text-blue-700'}`}>
+                                  执行时频率 {executionIntervalMinutes} 分钟
+                                </span>
+                              ) : null}
+                              {intervalMismatch ? (
+                                <span className="text-amber-600">当前任务已改为 {task.intervalMinutes} 分钟，这条日志生成于旧频率下</span>
+                              ) : null}
+                            </div>
                           </div>
                           <div className="grid shrink-0 grid-cols-2 gap-3 text-[11px] font-mono text-gray-700 sm:grid-cols-4">
                             <MetricStat label="TTFT" value={`${log.ttftMs} ms`} alert={log.violatedTtft} />
@@ -992,6 +1022,7 @@ export default function App() {
         log={selectedDiagnosticLog}
         onClose={() => setSelectedDiagnosticLog(null)}
         associatedTask={selectedDiagnosticLog ? tasks.find((task) => task.id === selectedDiagnosticLog.taskId) : undefined}
+        allLogs={logs}
       />
     </div>
   );

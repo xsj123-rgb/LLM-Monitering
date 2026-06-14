@@ -15,6 +15,7 @@ if db_path.exists():
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 
+import app.state as app_state
 from app.main import app
 from app.config import get_settings
 from app.core.rate_limit import login_rate_limiter
@@ -168,16 +169,23 @@ def test_manual_probe_writes_log_and_creates_incident(monkeypatch) -> None:
         },
     ).json()
 
+    logs_after_create = client.get("/api/logs")
+    assert logs_after_create.status_code == 200
+    assert len(logs_after_create.json()) == 1
+    assert logs_after_create.json()[0]["trigger"] == "scheduled"
+
     manual_probe = client.post(f"/api/tasks/{task['id']}/probe")
     assert manual_probe.status_code == 200
     assert manual_probe.json()["timestamp"].endswith("+08:00")
+    assert manual_probe.json()["requestPayloadJson"]["_probeContext"]["intervalMinutes"] == 5
+    assert manual_probe.json()["requestPayloadJson"]["_probeContext"]["trigger"] == "manual"
     assert manual_probe.json()["violatedTtft"] is True
     assert manual_probe.json()["violatedTps"] is True
     assert manual_probe.json()["violatedExtLatency"] is True
 
     logs = client.get("/api/logs")
     assert logs.status_code == 200
-    assert len(logs.json()) == 1
+    assert len(logs.json()) == 2
 
     notifications = client.get("/api/notifications")
     assert notifications.status_code == 200
@@ -193,3 +201,392 @@ def test_manual_probe_writes_log_and_creates_incident(monkeypatch) -> None:
     resolved = client.patch(f"/api/notifications/{payload[0]['id']}")
     assert resolved.status_code == 200
     assert resolved.json()["status"] == "resolved"
+
+
+def test_auto_resolved_incident_uses_current_recovery_metric(monkeypatch) -> None:
+    import app.services.probe as probe_service
+
+    state = {"adapter": FakeAdapter(ttft_ms=120, total_latency_ms=900, tps=250.0)}
+    monkeypatch.setattr(probe_service, "get_adapter", lambda channel_type: state["adapter"])
+
+    login()
+
+    channel = client.post(
+        "/api/channels",
+        json={
+            "name": "TPS Recovery Channel",
+            "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+            "apiKey": "sk-test",
+            "modelIdentifier": "test-model",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    ).json()
+
+    task = client.post(
+        "/api/tasks",
+        json={
+            "name": "TPS Recovery Guard",
+            "channelId": channel["id"],
+            "prompt": "ping",
+            "intervalMinutes": 5,
+            "concurrency": 1,
+            "status": "running",
+            "thresholds": {
+                "maxTtftMs": 300,
+                "minTps": 300,
+                "maxTotalLatencyMs": 1200,
+                "minSuccessRate": 0.95,
+            },
+            "alertChannels": [],
+        },
+    ).json()
+
+    firing_notifications = client.get("/api/notifications").json()
+    assert len(firing_notifications) == 1
+    assert firing_notifications[0]["status"] == "firing"
+    assert firing_notifications[0]["metricValue"] == "250.0 Tok/s"
+
+    state["adapter"] = FakeAdapter(ttft_ms=120, total_latency_ms=900, tps=320.0)
+    second_probe = client.post(f"/api/tasks/{task['id']}/probe")
+    assert second_probe.status_code == 200
+    assert second_probe.json()["violatedTps"] is False
+
+    notifications = client.get("/api/notifications").json()
+    assert len(notifications) == 1
+    assert notifications[0]["status"] == "resolved"
+    assert notifications[0]["metricValue"] == "320.0 Tok/s"
+    assert notifications[0]["thresholdValue"] == ">= 300.0 Tok/s"
+
+
+def test_task_mutations_sync_runtime_scheduler(monkeypatch) -> None:
+    import app.services.probe as probe_service
+
+    class DummyScheduler:
+        def __init__(self) -> None:
+            self.synced_task_ids: list[str] = []
+
+        async def sync_task(self, task_id: str) -> None:
+            self.synced_task_ids.append(task_id)
+
+    monkeypatch.setattr(probe_service, "get_adapter", lambda channel_type: FakeAdapter())
+
+    runtime_scheduler = DummyScheduler()
+    previous_scheduler = app_state.scheduler
+    app_state.scheduler = runtime_scheduler
+    monkeypatch.setattr("app.api.monitoring.app_state.scheduler", runtime_scheduler)
+
+    try:
+        login()
+
+        channel = client.post(
+            "/api/channels",
+            json={
+                "name": "Scheduler Sync Channel",
+                "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+                "apiKey": "sk-test",
+                "modelIdentifier": "test-model",
+                "type": "openai",
+                "status": "active",
+                "tags": ["test"],
+                "description": "test",
+            },
+        ).json()
+
+        task = client.post(
+            "/api/tasks",
+            json={
+                "name": "Scheduler Sync Guard",
+                "channelId": channel["id"],
+                "prompt": "ping",
+                "intervalMinutes": 5,
+                "concurrency": 1,
+                "status": "running",
+                "thresholds": {
+                    "maxTtftMs": 300,
+                    "minTps": 25,
+                    "maxTotalLatencyMs": 1200,
+                    "minSuccessRate": 0.95,
+                },
+                "alertChannels": [],
+            },
+        ).json()
+
+        updated = client.patch(
+            f"/api/tasks/{task['id']}",
+            json={
+                "intervalMinutes": 1,
+            },
+        )
+        assert updated.status_code == 200
+
+        deleted = client.delete(f"/api/tasks/{task['id']}")
+        assert deleted.status_code == 200
+
+        assert runtime_scheduler.synced_task_ids == [task["id"], task["id"], task["id"]]
+    finally:
+        app_state.scheduler = previous_scheduler
+
+
+def test_running_task_create_executes_immediately_and_resets_next_run(monkeypatch) -> None:
+    import app.services.probe as probe_service
+
+    monkeypatch.setattr(probe_service, "get_adapter", lambda channel_type: FakeAdapter())
+
+    login()
+
+    channel = client.post(
+        "/api/channels",
+        json={
+            "name": "Immediate Create Channel",
+            "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+            "apiKey": "sk-test",
+            "modelIdentifier": "test-model",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    ).json()
+
+    response = client.post(
+        "/api/tasks",
+        json={
+            "name": "Immediate Create Guard",
+            "channelId": channel["id"],
+            "prompt": "ping",
+            "intervalMinutes": 5,
+            "concurrency": 2,
+            "status": "running",
+            "thresholds": {
+                "maxTtftMs": 300,
+                "minTps": 25,
+                "maxTotalLatencyMs": 1200,
+                "minSuccessRate": 0.95,
+            },
+            "alertChannels": [],
+        },
+    )
+    assert response.status_code == 200
+    task = response.json()
+    assert task["lastRunAt"] is not None
+    assert task["nextRunAt"] is not None
+
+    logs = [log for log in client.get("/api/logs").json() if log["taskId"] == task["id"]]
+    assert len(logs) == 1
+    assert logs[0]["trigger"] == "scheduled"
+    assert logs[0]["sampleNo"] == 1
+
+
+def test_running_task_update_executes_immediately_with_new_interval(monkeypatch) -> None:
+    import app.services.probe as probe_service
+
+    monkeypatch.setattr(probe_service, "get_adapter", lambda channel_type: FakeAdapter())
+
+    login()
+
+    channel = client.post(
+        "/api/channels",
+        json={
+            "name": "Immediate Update Channel",
+            "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+            "apiKey": "sk-test",
+            "modelIdentifier": "test-model",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    ).json()
+
+    created = client.post(
+        "/api/tasks",
+        json={
+            "name": "Immediate Update Guard",
+            "channelId": channel["id"],
+            "prompt": "ping",
+            "intervalMinutes": 5,
+            "concurrency": 1,
+            "status": "paused",
+            "thresholds": {
+                "maxTtftMs": 300,
+                "minTps": 25,
+                "maxTotalLatencyMs": 1200,
+                "minSuccessRate": 0.95,
+            },
+            "alertChannels": [],
+        },
+    ).json()
+
+    response = client.patch(
+        f"/api/tasks/{created['id']}",
+        json={
+            "intervalMinutes": 1,
+            "status": "running",
+            "prompt": "ping again",
+        },
+    )
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["intervalMinutes"] == 1
+    assert updated["lastRunAt"] is not None
+    assert updated["nextRunAt"] is not None
+
+    logs = [log for log in client.get("/api/logs").json() if log["taskId"] == created["id"]]
+    assert len(logs) == 1
+    assert logs[0]["trigger"] == "scheduled"
+    assert logs[0]["requestPayloadJson"]["_probeContext"]["intervalMinutes"] == 1
+
+
+def test_editing_running_task_triggers_fresh_probe(monkeypatch) -> None:
+    import app.services.probe as probe_service
+
+    monkeypatch.setattr(probe_service, "get_adapter", lambda channel_type: FakeAdapter())
+
+    login()
+
+    channel = client.post(
+        "/api/channels",
+        json={
+            "name": "Edit Running Channel",
+            "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+            "apiKey": "sk-test",
+            "modelIdentifier": "test-model",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    ).json()
+
+    created = client.post(
+        "/api/tasks",
+        json={
+            "name": "Edit Running Guard",
+            "channelId": channel["id"],
+            "prompt": "ping",
+            "intervalMinutes": 5,
+            "concurrency": 1,
+            "status": "running",
+            "thresholds": {
+                "maxTtftMs": 300,
+                "minTps": 25,
+                "maxTotalLatencyMs": 1200,
+                "minSuccessRate": 0.95,
+            },
+            "alertChannels": [],
+        },
+    ).json()
+
+    first_logs = [log for log in client.get("/api/logs").json() if log["taskId"] == created["id"]]
+    assert len(first_logs) == 1
+
+    updated = client.patch(
+        f"/api/tasks/{created['id']}",
+        json={
+            "thresholds": {
+                "maxTtftMs": 100,
+                "minTps": 25,
+                "maxTotalLatencyMs": 1200,
+                "minSuccessRate": 0.95,
+            },
+        },
+    )
+    assert updated.status_code == 200
+
+    second_logs = [log for log in client.get("/api/logs").json() if log["taskId"] == created["id"]]
+    assert len(second_logs) == 2
+
+
+def test_push_report_delivers_to_enabled_feishu_channels(monkeypatch) -> None:
+    import app.services.notifier as notifier_service
+    import app.services.probe as probe_service
+
+    sent_payloads: list[tuple[str, dict]] = []
+
+    async def fake_send_webhook(endpoint, payload):  # noqa: ANN001
+        sent_payloads.append((endpoint.name, payload))
+        return "ok"
+
+    async def fake_send_pdf(**kwargs):  # noqa: ANN003
+        return False, "未配置 FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_REPORT_CHAT_ID，已跳过 PDF 附件发送。"
+
+    monkeypatch.setattr(probe_service, "get_adapter", lambda channel_type: FakeAdapter())
+    monkeypatch.setattr(notifier_service, "_send_webhook", fake_send_webhook)
+    monkeypatch.setattr(notifier_service, "send_feishu_report_pdf", fake_send_pdf)
+
+    login()
+
+    feishu_alert = client.post(
+        "/api/alerts",
+        json={
+            "name": "DevOps 飞书群",
+            "type": "feishu",
+            "webhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/test",
+            "secret": "",
+            "status": "enabled",
+        },
+    )
+    assert feishu_alert.status_code == 200
+
+    disabled_alert = client.post(
+        "/api/alerts",
+        json={
+            "name": "Disabled 飞书群",
+            "type": "feishu",
+            "webhookUrl": "https://open.feishu.cn/open-apis/bot/v2/hook/disabled",
+            "secret": "",
+            "status": "disabled",
+        },
+    )
+    assert disabled_alert.status_code == 200
+
+    channel = client.post(
+        "/api/channels",
+        json={
+            "name": "Report Channel",
+            "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+            "apiKey": "sk-test",
+            "modelIdentifier": "test-model",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    ).json()
+
+    created_task = client.post(
+        "/api/tasks",
+        json={
+            "name": "Report Guard",
+            "channelId": channel["id"],
+            "prompt": "ping",
+            "intervalMinutes": 5,
+            "concurrency": 1,
+            "status": "running",
+            "thresholds": {
+                "maxTtftMs": 300,
+                "minTps": 25,
+                "maxTotalLatencyMs": 1200,
+                "minSuccessRate": 0.95,
+            },
+            "alertChannels": [],
+        },
+    )
+    assert created_task.status_code == 200
+
+    response = client.post("/api/reports/push?period=weekly")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["period"] == "weekly"
+    assert payload["deliveredCount"] == 1
+    assert payload["failedCount"] == 0
+    assert payload["endpointNames"] == ["DevOps 飞书群"]
+    assert payload["attachmentSent"] is False
+    assert "已跳过 PDF 附件发送" in payload["attachmentMessage"]
+    assert len(sent_payloads) == 1
+    assert sent_payloads[0][0] == "DevOps 飞书群"
+    assert sent_payloads[0][1]["kind"] == "report"
+    assert sent_payloads[0][1]["periodLabel"] == "周报"

@@ -54,6 +54,11 @@ async def execute_probe_task(
         violated_ttft = result.success and result.ttft_ms > task.max_ttft_ms
         violated_tps = result.success and result.tps < task.min_tps
         violated_latency = result.success and result.total_latency_ms > task.max_total_latency_ms
+        request_payload = dict(result.request_payload or {})
+        request_payload["_probeContext"] = {
+            "intervalMinutes": task.interval_minutes,
+            "trigger": trigger,
+        }
         run = ProbeRun(
             batch_id=batch.id,
             task_id=task.id,
@@ -77,7 +82,7 @@ async def execute_probe_task(
             violated_ext_latency=violated_latency,
             sample_no=index,
             trigger=trigger,
-            request_payload_json=result.request_payload,
+            request_payload_json=request_payload,
             response_excerpt=result.response_excerpt,
             token_count_source=result.token_count_source,
             error_type=result.error_type,
@@ -138,6 +143,12 @@ async def _handle_incidents(db: Session, task: ProbeTask, channel: ModelChannel,
         triggers.append(
             ("latency", "端到端总时间 (Latency)", f"{max_latency} ms", f"< {task.max_total_latency_ms} ms")
         )
+    recovery_snapshots = {
+        "connection": ("探测连接熔断", "HTTP 200", "HTTP 200"),
+        "ttft": ("首字延迟 (TTFT)", f"{worst_ttft} ms", f"< {task.max_ttft_ms} ms"),
+        "tps": ("吞吐速率 (TPS)", f"{min_tps:.1f} Tok/s", f">= {task.min_tps} Tok/s"),
+        "latency": ("端到端总时间 (Latency)", f"{max_latency} ms", f"< {task.max_total_latency_ms} ms"),
+    }
 
     open_incidents = list(
         db.scalars(
@@ -187,6 +198,11 @@ async def _handle_incidents(db: Session, task: ProbeTask, channel: ModelChannel,
     for incident in open_incidents:
         if incident.metric_type in fired_metric_types:
             continue
+        snapshot = recovery_snapshots.get(incident.metric_type)
+        if snapshot:
+            incident.metric_name = snapshot[0]
+            incident.metric_value = snapshot[1]
+            incident.threshold_value = snapshot[2]
         incident.status = "resolved"
         incident.resolved_at = now
         db.commit()

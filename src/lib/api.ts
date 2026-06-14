@@ -5,6 +5,7 @@ import type {
   DialTask,
   MetricLog,
   ModelChannel,
+  ReportPushResult,
 } from '../types';
 
 class ApiError extends Error {
@@ -103,6 +104,10 @@ export const api = {
   notifications: {
     list: () => request<AlertNotification[]>('/api/notifications'),
     resolve: (id: string) => request<AlertNotification>(`/api/notifications/${id}`, { method: 'PATCH' }),
+  },
+  reports: {
+    push: (period: 'daily' | 'weekly' | 'monthly') =>
+      request<ReportPushResult>(`/api/reports/push?period=${period}`, { method: 'POST' }),
   },
 };
 
