@@ -73,7 +73,7 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
       if (complianceRate >= 98) {
         healthRating = '卓越以太级 (A级)';
         ratingColor = '#10b981';
-        complianceAdvice = `性能处于绿区（均值TTFT: ${avgTtft}ms, TPS: ${avgTps}Tok/s, 字间延迟: ${avgItl}ms/字）。各时段吞吐无任何退化，可用性高。健康等级：A。建议：无需硬件改动，维持现有 A100 / GPU 计算单元。`;
+        complianceAdvice = `性能处于绿区（TPS: ${avgTps}Tok/s, 均值TTFT: ${avgTtft}ms, 字间延迟: ${avgItl}ms/字）。各时段吞吐无任何退化，可用性高。健康等级：A。建议：无需硬件改动，维持现有 A100 / GPU 计算单元。`;
       } else if (complianceRate >= 94) {
         healthRating = '良好常规级 (B级)';
         ratingColor = '#eab308'; // amber yellow
@@ -104,11 +104,11 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
 
   const handleExportCSV = () => {
     let csvContent = 'data:text/csv;charset=utf-8,';
-    csvContent += 'Timestamp,Channel Name,Task Name,TTFT(ms),TPS(Tokens/s),Latency(ms),Status,SLA Violation?\n';
+    csvContent += 'Timestamp,Channel Name,Task Name,TPS(Tokens/s),TTFT(ms),Latency(ms),Status,SLA Violation?\n';
     
     currentPeriodLogs.forEach(log => {
       const isViolated = log.violatedTtft || log.violatedTps || log.violatedExtLatency ? 'YES' : 'NO';
-      const row = `"${formatBeijingTime(log.timestamp)}","${log.channelName}","${log.taskName}",${log.ttftMs},${log.tps},${log.totalLatencyMs},"${log.success ? 'SUCCESS' : 'FAILED'}","${isViolated}"`;
+      const row = `"${formatBeijingTime(log.timestamp)}","${log.channelName}","${log.taskName}",${log.tps},${log.ttftMs},${log.totalLatencyMs},"${log.success ? 'SUCCESS' : 'FAILED'}","${isViolated}"`;
       csvContent += row + '\n';
     });
 
@@ -313,9 +313,9 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
               <th>模型实例名称</th>
               <th>SLA 达标率</th>
               <th>健康可用率</th>
+              <th>平均吞吐 (TPS)</th>
               <th>首字均延 (TTFT)</th>
               <th>峰值 TTFT</th>
-              <th>平均吞吐 (TPS)</th>
               <th>字间延迟 (ITL)</th>
             </tr>
           </thead>
@@ -330,9 +330,9 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
                   ${item.complianceRate.toFixed(1)}%
                 </td>
                 <td>${item.successRate.toFixed(1)}%</td>
+                <td style="color: #10b981; font-weight: bold;">${item.avgTps} Tok/s</td>
                 <td>${item.avgTtft} ms</td>
                 <td style="color: ${item.worstTtft > 800 ? '#ef4444' : '#475569'}">${item.worstTtft} ms</td>
-                <td style="color: #10b981; font-weight: bold;">${item.avgTps} Tok/s</td>
                 <td>${item.avgItl} ms/字</td>
               </tr>
             `).join('')}
@@ -556,12 +556,12 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
             {/* Grid of Average SLA Metrics */}
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-2.5">
               <div className="flex flex-col border-b border-gray-100 pb-1">
-                <span className="text-[9px] text-gray-400 font-sans">首字延时 (TTFT) 均值</span>
-                <span className="text-xs font-bold font-mono text-slate-800 mt-0.5">{avgSlaStats.avgTtft} ms</span>
-              </div>
-              <div className="flex flex-col border-b border-gray-100 pb-1">
                 <span className="text-[9px] text-gray-400 font-sans">吞吐速率 (TPS) 均值</span>
                 <span className="text-xs font-bold font-mono text-emerald-600 mt-0.5">{avgSlaStats.avgTps} Tok/s</span>
+              </div>
+              <div className="flex flex-col border-b border-gray-100 pb-1">
+                <span className="text-[9px] text-gray-400 font-sans">首字延时 (TTFT) 均值</span>
+                <span className="text-xs font-bold font-mono text-slate-800 mt-0.5">{avgSlaStats.avgTtft} ms</span>
               </div>
               <div className="flex flex-col border-b border-gray-100 pb-1">
                 <span className="text-[9px] text-gray-400 font-sans">字间延迟 (ITL) 均值</span>
@@ -614,78 +614,86 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
           {channelBreakdown.map(item => (
             <div 
               key={item.channel.id} 
-              className="p-4 bg-gray-50/70 border border-gray-100 rounded-2xl flex flex-col lg:flex-row justify-between gap-4 font-sans"
+              className="p-4 bg-gray-50/70 border border-gray-100 rounded-2xl font-sans"
             >
-              {/* Channel Meta */}
-              <div className="lg:w-1/3 space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${
-                    item.complianceRate >= 99 ? 'bg-emerald-500' : item.complianceRate >= 95 ? 'bg-amber-400' : 'bg-rose-500'
-                  }`} />
-                  <span className="font-bold text-gray-900 text-sm font-sans">{item.channel.name}</span>
-                </div>
-                <div className="text-[10px] text-gray-400 truncate font-mono">
-                  接口: {item.channel.apiEndpoint}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  <span className="text-[9px] bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded font-mono">
-                    {item.channel.modelIdentifier}
-                  </span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase ${
-                    item.channel.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                  }`}>
-                    {item.channel.status}
-                  </span>
-                </div>
-              </div>
-
-              {/* Statistics Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 bg-white p-3 rounded-xl border border-gray-100/85 lg:w-1/2">
-                <div>
-                  <span className="text-[9px] text-gray-400 block font-sans">SLA 达标率</span>
-                  <span className={`text-sm font-bold font-mono ${
-                    item.complianceRate >= 99 ? 'text-emerald-600' : item.complianceRate >= 95 ? 'text-amber-500' : 'text-rose-500'
-                  }`}>
-                    {item.complianceRate.toFixed(1)}%
-                  </span>
+              <div className="grid gap-4 xl:grid-cols-[minmax(240px,0.85fr)_minmax(520px,1.45fr)]">
+                {/* Channel Meta */}
+                <div className="min-w-0 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                      item.complianceRate >= 99 ? 'bg-emerald-500' : item.complianceRate >= 95 ? 'bg-amber-400' : 'bg-rose-500'
+                    }`} />
+                    <span className="min-w-0 truncate font-bold text-gray-900 text-sm font-sans" title={item.channel.name}>
+                      {item.channel.name}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-gray-400 truncate font-mono" title={item.channel.apiEndpoint}>
+                    接口: {item.channel.apiEndpoint}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-[9px] bg-slate-200/80 text-slate-700 px-1.5 py-0.5 rounded font-mono">
+                      {item.channel.modelIdentifier}
+                    </span>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase ${
+                      item.channel.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                    }`}>
+                      {item.channel.status}
+                    </span>
+                  </div>
                 </div>
 
-                <div>
-                  <span className="text-[9px] text-gray-400 block font-sans">首字延迟 (TTFT)</span>
-                  <span className="text-sm font-bold font-mono text-gray-800">
-                    {item.avgTtft} ms
-                  </span>
-                </div>
+                {/* Statistics Grid */}
+                <div className="grid grid-cols-2 gap-2 bg-white p-3 rounded-xl border border-gray-100/85 md:grid-cols-5">
+                  <div>
+                    <span className="text-[9px] text-gray-400 block font-sans">SLA 达标率</span>
+                    <span className={`text-sm font-bold font-mono ${
+                      item.complianceRate >= 99 ? 'text-emerald-600' : item.complianceRate >= 95 ? 'text-amber-500' : 'text-rose-500'
+                    }`}>
+                      {item.complianceRate.toFixed(1)}%
+                    </span>
+                  </div>
 
-                <div>
-                  <span className="text-[9px] text-gray-400 block font-sans">最大峰值延迟</span>
-                  <span className={`text-sm font-bold font-mono ${item.worstTtft > 800 ? 'text-rose-500' : 'text-gray-700'}`}>
-                    {item.worstTtft} ms
-                  </span>
-                </div>
+                  <div>
+                    <span className="text-[9px] text-gray-400 block font-sans">均值吞吐 (TPS)</span>
+                    <span className="text-sm font-bold font-mono text-emerald-600">
+                      {item.avgTps} Tok/s
+                    </span>
+                  </div>
 
-                <div>
-                  <span className="text-[9px] text-gray-400 block font-sans">均值吞吐 (TPS)</span>
-                  <span className="text-sm font-bold font-mono text-emerald-600">
-                    {item.avgTps} Tok/s
-                  </span>
-                </div>
+                  <div>
+                    <span className="text-[9px] text-gray-400 block font-sans">首字延迟 (TTFT)</span>
+                    <span className="text-sm font-bold font-mono text-gray-800">
+                      {item.avgTtft} ms
+                    </span>
+                  </div>
 
-                <div>
-                  <span className="text-[9px] text-gray-400 block font-sans">字间延迟 (ITL)</span>
-                  <span className="text-sm font-bold font-mono text-purple-600">
-                    {item.avgItl} ms/字
-                  </span>
+                  <div>
+                    <span className="text-[9px] text-gray-400 block font-sans">最大峰值延迟</span>
+                    <span className={`text-sm font-bold font-mono ${item.worstTtft > 800 ? 'text-rose-500' : 'text-gray-700'}`}>
+                      {item.worstTtft} ms
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-[9px] text-gray-400 block font-sans">字间延迟 (ITL)</span>
+                    <span className="text-sm font-bold font-mono text-purple-600">
+                      {item.avgItl} ms/字
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* Capacity decision advice */}
-              <div className="lg:w-1/4 p-3 bg-blue-50/30 rounded-xl border border-blue-50/50 text-[10px] text-blue-950 leading-relaxed font-sans">
-                <div className="flex items-center gap-1.5 font-bold mb-1">
-                  <ArrowUpRight className="w-3 h-3 text-brand" />
-                  <span>资源健康度评估与针对性建议 :</span>
+              <div className="mt-4 rounded-2xl border border-blue-100/80 bg-gradient-to-r from-blue-50/80 via-white to-cyan-50/60 px-4 py-3 text-[11px] text-blue-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] font-sans">
+                <div className="flex items-start gap-2.5">
+                  <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-brand shadow-xs ring-1 ring-blue-100">
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                  </span>
+                  <div className="min-w-0">
+                    <div className="font-bold tracking-tight">资源健康度评估与针对性建议</div>
+                    <p className="mt-1 text-gray-650 leading-5 font-sans">{item.complianceAdvice}</p>
+                  </div>
                 </div>
-                <p className="text-gray-650 font-sans">{item.complianceAdvice}</p>
               </div>
 
             </div>

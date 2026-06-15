@@ -219,6 +219,21 @@ export function TaskModal({ isOpen, onClose, onSave, task, channels, alerts }: T
             
             <div className="grid grid-cols-3 gap-3">
               <div>
+                <label className="block text-[11px] font-semibold text-slate-700 mb-1">Min TPS Limit</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={1}
+                    value={minTps}
+                    onChange={e => setMinTps(Number(e.target.value))}
+                    className="w-full pl-3 pr-10 py-1.5 text-xs border border-gray-200 bg-white rounded-lg focus:ring-1 focus:ring-slate-400 outline-none font-mono"
+                  />
+                  <span className="absolute right-1.5 top-2 text-[9px] text-gray-400">Tok/s</span>
+                </div>
+                <span className="text-[9px] text-gray-400">吞吐低限</span>
+              </div>
+
+              <div>
                 <label className="block text-[11px] font-semibold text-slate-700 mb-1">Max TTFT Limit</label>
                 <div className="relative">
                   <input
@@ -232,21 +247,6 @@ export function TaskModal({ isOpen, onClose, onSave, task, channels, alerts }: T
                   <span className="absolute right-2.5 top-2 text-[10px] text-gray-400">ms</span>
                 </div>
                 <span className="text-[9px] text-gray-400">首字限制</span>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">Min TPS Limit</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    min={1}
-                    value={minTps}
-                    onChange={e => setMinTps(Number(e.target.value))}
-                    className="w-full pl-3 pr-10 py-1.5 text-xs border border-gray-200 bg-white rounded-lg focus:ring-1 focus:ring-slate-400 outline-none font-mono"
-                  />
-                  <span className="absolute right-1.5 top-2 text-[9px] text-gray-400">Tok/s</span>
-                </div>
-                <span className="text-[9px] text-gray-400">吞吐低限</span>
               </div>
 
               <div>

@@ -242,7 +242,7 @@ export function ChannelModal({ isOpen, onClose, onSave, channel }: ChannelModalP
             <div>
               <p className="font-semibold">SLA 拨测自动联动说明</p>
               <p className="text-[10px] text-blue-700 mt-0.5">
-                渠道保存后，您可为其创建拨测探测，设置首字延迟(TTFT)限制与最低吞吐量(TPS)硬指标，异常时自动触发机器人告警。
+                渠道保存后，您可为其创建拨测探测，优先设置最低吞吐量(TPS)，并结合首字延迟(TTFT)限制，异常时自动触发机器人告警。
               </p>
             </div>
           </div>

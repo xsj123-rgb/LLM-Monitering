@@ -99,7 +99,7 @@ export default function App() {
   const [dashboardChannelId, setDashboardChannelId] = useState('');
   const [logsFilterChannel, setLogsFilterChannel] = useState('');
   const [logsFilterStatus, setLogsFilterStatus] = useState<'all' | 'success' | 'fail' | 'violation'>('all');
-  const [logsFilterTimeRange, setLogsFilterTimeRange] = useState<'all' | '1h' | '6h' | '24h' | '7d'>('all');
+  const [logsFilterTimeRange, setLogsFilterTimeRange] = useState<'all' | '2h' | '24h' | '7d' | '30d'>('all');
   const [probeLoadingTaskId, setProbeLoadingTaskId] = useState<string | null>(null);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -476,10 +476,10 @@ export default function App() {
         const now = Date.now();
         const diffMs = now - new Date(log.timestamp).getTime();
         const rangeMap = {
-          '1h': 60 * 60 * 1000,
-          '6h': 6 * 60 * 60 * 1000,
+          '2h': 2 * 60 * 60 * 1000,
           '24h': 24 * 60 * 60 * 1000,
           '7d': 7 * 24 * 60 * 60 * 1000,
+          '30d': 30 * 24 * 60 * 60 * 1000,
         };
         if (diffMs > rangeMap[logsFilterTimeRange]) return false;
       }
@@ -640,7 +640,7 @@ export default function App() {
                           <Activity className="h-4 w-4 text-blue-600" />
                           大模型主动拨测 SLA 监控大盘
                         </h3>
-                        <p className="mt-1 text-[11px] text-gray-400">聚合 TTFT、TPS、ITL 与 E2E 的时序拨测结果。</p>
+                        <p className="mt-1 text-[11px] text-gray-400">聚合 TPS、TTFT、ITL 与 E2E 的时序拨测结果。</p>
                       </div>
                       <AppSelect
                         value={dashboardChannelId}
@@ -649,7 +649,7 @@ export default function App() {
                           { value: '', label: '-- 所有渠道合并分析 --' },
                           ...channels.map((channel) => ({ value: channel.id, label: channel.name })),
                         ]}
-                        className="rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs sm:w-[240px]"
                       />
                     </div>
 
@@ -884,8 +884,8 @@ export default function App() {
                           <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                             <MetricChip label="频率" value={`${task.intervalMinutes} 分钟`} />
                             <MetricChip label="并发数" value={`${task.concurrency}`} />
-                            <MetricChip label="TTFT 上限" value={`${task.thresholds.maxTtftMs} ms`} />
                             <MetricChip label="TPS 下限" value={`${task.thresholds.minTps} Tok/s`} />
+                            <MetricChip label="TTFT 上限" value={`${task.thresholds.maxTtftMs} ms`} />
                             <MetricChip label="E2E 上限" value={`${task.thresholds.maxTotalLatencyMs} ms`} />
                           </div>
                         </div>
@@ -924,10 +924,10 @@ export default function App() {
                       onChange={setLogsFilterTimeRange}
                       options={[
                         { value: 'all', label: '全量' },
-                        { value: '1h', label: '近 1 小时' },
-                        { value: '6h', label: '近 6 小时' },
+                        { value: '2h', label: '近 2 小时' },
                         { value: '24h', label: '近 24 小时' },
-                        { value: '7d', label: '近 7 天' },
+                        { value: '7d', label: '近一周' },
+                        { value: '30d', label: '近一个月' },
                       ]}
                       className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
                     />
@@ -982,8 +982,8 @@ export default function App() {
                             </div>
                           </div>
                           <div className="grid shrink-0 grid-cols-2 gap-3 text-[11px] font-mono text-gray-700 sm:grid-cols-4">
-                            <MetricStat label="TTFT" value={`${log.ttftMs} ms`} alert={log.violatedTtft} />
                             <MetricStat label="TPS" value={`${log.tps} Tok/s`} alert={log.violatedTps} />
+                            <MetricStat label="TTFT" value={`${log.ttftMs} ms`} alert={log.violatedTtft} />
                             <MetricStat label="E2E" value={`${log.totalLatencyMs} ms`} alert={log.violatedExtLatency} />
                             <MetricStat label="状态" value={log.success ? 'OK' : `HTTP ${log.statusCode}`} alert={!log.success} />
                           </div>
@@ -1027,10 +1027,11 @@ export default function App() {
                             {isAdmin ? (
                               <div className="flex items-center gap-1">
                                 <button
-                                  className="rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-700 transition hover:bg-gray-50"
+                                  title="测试"
                                   onClick={() => void handleTestAlertConnection(alert)}
+                                  className="rounded-xl border border-gray-200 p-2 text-gray-500 transition hover:bg-gray-50 hover:text-gray-700"
                                 >
-                                  测试
+                                  <Send className="h-4 w-4 -rotate-12" />
                                 </button>
                                 <IconButton
                                   title="编辑"

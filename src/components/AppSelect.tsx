@@ -96,6 +96,7 @@ export function AppSelect<T extends string | number>({
                 type="button"
                 role="option"
                 aria-selected={isSelected}
+                title={option.label}
                 className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-sm transition ${
                   isSelected
                     ? 'bg-blue-50 text-blue-700'
@@ -126,6 +127,7 @@ export function AppSelect<T extends string | number>({
         disabled={disabled}
         onClick={() => setIsOpen((current) => !current)}
         onKeyDown={handleKeyDown}
+        title={selectedOption?.label}
         className={`inline-flex min-h-10 items-center justify-between gap-3 bg-white text-left text-slate-900 transition hover:border-slate-300 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
       >
         <span className={`truncate ${selectedOption ? '' : 'text-slate-400'}`}>

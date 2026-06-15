@@ -13,7 +13,7 @@ export function LoginPage({ onSubmit, isSubmitting, error }: LoginPageProps) {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
 
   const capabilityCards = [
-    { label: '拨测监控', value: 'TTFT / TPS / E2E', icon: <Radar className="h-4 w-4" /> },
+    { label: '拨测监控', value: 'TPS / TTFT / E2E', icon: <Radar className="h-4 w-4" /> },
     { label: '异常联动', value: '飞书 / 钉钉 / Webhook', icon: <ShieldCheck className="h-4 w-4" /> },
     { label: '审计视图', value: '日志 / 报表 / 恢复轨迹', icon: <Sparkles className="h-4 w-4" /> },
   ];
@@ -25,7 +25,7 @@ export function LoginPage({ onSubmit, isSubmitting, error }: LoginPageProps) {
   ];
 
   const detailCards = [
-    { title: '节点监控', value: 'TTFT / TPS' },
+    { title: '节点监控', value: 'TPS / TTFT' },
     { title: '异常恢复', value: '事件流追踪' },
     { title: '审计导出', value: '日报 / 周报' },
   ];
@@ -69,7 +69,7 @@ export function LoginPage({ onSubmit, isSubmitting, error }: LoginPageProps) {
                         本地模型拨测与告警控制台
                       </h1>
                       <p className="mt-4 max-w-xl text-[15px] leading-7 text-slate-500">
-                        统一查看 TTFT、TPS、E2E、告警与恢复状态，让值班排障更直接。
+                        统一查看 TPS、TTFT、E2E、告警与恢复状态，让值班排障更直接。
                       </p>
                     </div>
 

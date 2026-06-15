@@ -15,8 +15,8 @@ interface SLAChartsProps {
 
 export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
   // --- States for customization ---
-  const [selectedMetrics, setSelectedMetrics] = useState<('ttft' | 'tps' | 'itl' | 'e2e')[]>(['ttft', 'tps']);
-  const [timeRange, setTimeRange] = useState<'1h' | '24h' | '7d' | '30d' | 'custom'>('24h');
+  const [selectedMetrics, setSelectedMetrics] = useState<('ttft' | 'tps' | 'itl' | 'e2e')[]>(['tps', 'ttft']);
+  const [timeRange, setTimeRange] = useState<'2h' | '24h' | '7d' | '30d' | 'custom'>('24h');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [smooth, setSmooth] = useState(true);
@@ -46,8 +46,8 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
   const now = new Date();
   const timeFilteredLogs = channelFilteredLogs.filter(log => {
     const logTime = new Date(log.timestamp).getTime();
-    if (timeRange === '1h') {
-      return now.getTime() - logTime <= 60 * 60 * 1000;
+    if (timeRange === '2h') {
+      return now.getTime() - logTime <= 2 * 60 * 60 * 1000;
     }
     if (timeRange === '24h') {
       return now.getTime() - logTime <= 24 * 60 * 60 * 1000;
@@ -291,7 +291,7 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
       
       // format label depending on timeRange
       let labelStr = '';
-      if (timeRange === '1h') {
+      if (timeRange === '2h') {
         labelStr = `${String(bjObj.hours).padStart(2, '0')}:${String(bjObj.minutes).padStart(2, '0')}`;
       } else if (timeRange === '24h') {
         labelStr = `${String(bjObj.hours).padStart(2, '0')}:${String(bjObj.minutes).padStart(2, '0')}`;
@@ -329,18 +329,6 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
       {/* KPI Cards Summary Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4" id="sla-summary-cards">
         <div className="p-4 bg-white border border-gray-100 rounded-2xl shadow-xs transition-all hover:shadow-sm">
-          <div className="text-xs text-gray-400 font-medium font-sans">首字延迟 (TTFT) 均值</div>
-          <div className="mt-1 flex items-baseline gap-1">
-            <span className="text-2xl font-bold tracking-tight text-gray-900 font-mono">{avgTtft}</span>
-            <span className="text-xs text-gray-400 font-mono">ms</span>
-          </div>
-          <div className="mt-2 text-[10px] text-gray-400 flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-            <span>核心体验流畅性阈值</span>
-          </div>
-        </div>
-
-        <div className="p-4 bg-white border border-gray-100 rounded-2xl shadow-xs transition-all hover:shadow-sm">
           <div className="text-xs text-gray-400 font-medium font-sans">文本吞吐速率 (TPS) 均值</div>
           <div className="mt-1 flex items-baseline gap-1">
             <span className="text-2xl font-bold tracking-tight text-gray-900 font-mono text-emerald-600">{avgTps}</span>
@@ -349,6 +337,18 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
           <div className="mt-2 text-[10px] text-gray-400 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
             <span>流式推理渲染速度越大越流畅</span>
+          </div>
+        </div>
+
+        <div className="p-4 bg-white border border-gray-100 rounded-2xl shadow-xs transition-all hover:shadow-sm">
+          <div className="text-xs text-gray-400 font-medium font-sans">首字延迟 (TTFT) 均值</div>
+          <div className="mt-1 flex items-baseline gap-1">
+            <span className="text-2xl font-bold tracking-tight text-gray-900 font-mono">{avgTtft}</span>
+            <span className="text-xs text-gray-400 font-mono">ms</span>
+          </div>
+          <div className="mt-2 text-[10px] text-gray-400 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+            <span>核心体验流畅性阈值</span>
           </div>
         </div>
 
@@ -582,16 +582,16 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
             <div>
-              <span className="text-gray-400 block text-[10px]">1. 首字延迟 (TTFT) :</span>
-              <span className={`font-bold ${activeLog.violatedTtft ? 'text-red-400' : 'text-blue-300'}`}>
-                {activeLog.ttftMs} ms
+              <span className="text-gray-400 block text-[10px]">1. 吞吐效率 (TPS) :</span>
+              <span className={`font-bold ${activeLog.violatedTps ? 'text-red-400' : 'text-emerald-300'}`}>
+                {activeLog.tps} Tok/s
               </span>
             </div>
 
             <div>
-              <span className="text-gray-400 block text-[10px]">2. 吞吐效率 (TPS) :</span>
-              <span className={`font-bold ${activeLog.violatedTps ? 'text-red-400' : 'text-emerald-300'}`}>
-                {activeLog.tps} Tok/s
+              <span className="text-gray-400 block text-[10px]">2. 首字延迟 (TTFT) :</span>
+              <span className={`font-bold ${activeLog.violatedTtft ? 'text-red-400' : 'text-blue-300'}`}>
+                {activeLog.ttftMs} ms
               </span>
             </div>
 
@@ -666,8 +666,8 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
           <span className="font-bold text-gray-700 block">1. 监控展示指标配置 :</span>
           <div className="flex flex-wrap gap-3">
             {[
-              { id: 'ttft' as const, label: '首字延迟 (TTFT)', color: 'border-blue-500 checked:bg-blue-500' },
               { id: 'tps' as const, label: '吞吐速率 (TPS)', color: 'border-emerald-500 checked:bg-emerald-500' },
+              { id: 'ttft' as const, label: '首字延迟 (TTFT)', color: 'border-blue-500 checked:bg-blue-500' },
               { id: 'itl' as const, label: '字间延迟 (ITL)', color: 'border-purple-500 checked:bg-purple-500' },
               { id: 'e2e' as const, label: '端到端总时延 (E2E)', color: 'border-pink-500 checked:bg-pink-500' }
             ].map(item => (
@@ -696,13 +696,13 @@ export function SLACharts({ logs, channelId, thresholds }: SLAChartsProps) {
 
         {/* Time period select options */}
         <div className="space-y-2 md:text-right shrink-0">
-          <span className="font-bold text-gray-700 block md:text-left">2. 数据监控探测时序范围 (最长一个月) :</span>
+          <span className="font-bold text-gray-700 block md:text-left">2. 数据监控探测时序范围：</span>
           <div className="flex flex-wrap items-center gap-2">
             {[
-              { id: '1h' as const, label: '1小时' },
+              { id: '2h' as const, label: '2小时' },
               { id: '24h' as const, label: '24小时' },
-              { id: '7d' as const, label: '7天' },
-              { id: '30d' as const, label: '30天/一个月' },
+              { id: '7d' as const, label: '一周' },
+              { id: '30d' as const, label: '一个月' },
               { id: 'custom' as const, label: '自定义...' }
             ].map(opt => (
               <button
