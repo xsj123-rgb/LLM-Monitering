@@ -17,6 +17,16 @@ export interface ModelChannel {
   lastProbeAt?: string | null;
   lastOkAt?: string | null;
   description?: string;
+  deploymentMode?: 'k8s' | 'docker' | 'bare_metal' | 'other' | null;
+  deploymentConfig?: string | null;
+  deploymentEnv?: string | null;
+  deploymentArgs?: string | null;
+  aiDiagnosticEnabled?: boolean;
+}
+
+export interface ModelDiscoveryResult {
+  models: string[];
+  sourceUrl?: string | null;
 }
 
 export interface SLAThresholds {
@@ -113,6 +123,17 @@ export interface ReportPushResult {
   errors: string[];
   attachmentSent: boolean;
   attachmentMessage?: string | null;
+}
+
+export interface AuditAdviceItem {
+  channelId: string;
+  advice: string;
+  source: 'ai' | 'disabled' | 'error';
+}
+
+export interface AuditAdviceResponse {
+  period: 'daily' | 'weekly' | 'monthly';
+  items: AuditAdviceItem[];
 }
 
 export interface AuthUser {

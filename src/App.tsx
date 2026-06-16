@@ -69,6 +69,23 @@ function buildToast(title: string, message: string, category: Toast['category'])
   };
 }
 
+function getLogStatus(log: MetricLog): 'normal' | 'abnormal' | 'unreachable' {
+  if (!log.success) {
+    return 'unreachable';
+  }
+  if (log.violatedTtft || log.violatedTps || log.violatedExtLatency) {
+    return 'abnormal';
+  }
+  return 'normal';
+}
+
+function getLogStatusLabel(log: MetricLog): string {
+  const status = getLogStatus(log);
+  if (status === 'normal') return '正常';
+  if (status === 'abnormal') return '异常';
+  return '不可达';
+}
+
 export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -98,7 +115,7 @@ export default function App() {
   const [channelsSearch, setChannelsSearch] = useState('');
   const [dashboardChannelId, setDashboardChannelId] = useState('');
   const [logsFilterChannel, setLogsFilterChannel] = useState('');
-  const [logsFilterStatus, setLogsFilterStatus] = useState<'all' | 'success' | 'fail' | 'violation'>('all');
+  const [logsFilterStatus, setLogsFilterStatus] = useState<'all' | 'normal' | 'abnormal' | 'unreachable'>('all');
   const [logsFilterTimeRange, setLogsFilterTimeRange] = useState<'all' | '2h' | '24h' | '7d' | '30d'>('all');
   const [probeLoadingTaskId, setProbeLoadingTaskId] = useState<string | null>(null);
 
@@ -464,12 +481,7 @@ export default function App() {
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
       if (logsFilterChannel && log.channelId !== logsFilterChannel) return false;
-      if (logsFilterStatus === 'success' && !log.success) return false;
-      if (logsFilterStatus === 'fail' && log.success) return false;
-      if (
-        logsFilterStatus === 'violation' &&
-        !(log.success && (log.violatedTtft || log.violatedTps || log.violatedExtLatency))
-      ) {
+      if (logsFilterStatus !== 'all' && getLogStatus(log) !== logsFilterStatus) {
         return false;
       }
       if (logsFilterTimeRange !== 'all') {
@@ -705,7 +717,7 @@ export default function App() {
                       <div className="divide-y divide-gray-50">
                         {recentLogs.length === 0 ? <EmptyBlock label="暂无拨测日志，任务启动后这里会自动出现。" /> : null}
                         {recentLogs.map((log) => {
-                          const hasViolation = log.success && (log.violatedTtft || log.violatedTps || log.violatedExtLatency);
+                          const status = getLogStatus(log);
                           const executionIntervalMinutes = getExecutionIntervalMinutes(log, logs);
                           return (
                             <button
@@ -715,8 +727,27 @@ export default function App() {
                             >
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className={`h-2 w-2 rounded-full ${!log.success ? 'bg-rose-500' : hasViolation ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                                  <span
+                                    className={`h-2 w-2 rounded-full ${
+                                      status === 'unreachable'
+                                        ? 'bg-rose-500'
+                                        : status === 'abnormal'
+                                          ? 'bg-amber-400'
+                                          : 'bg-emerald-400'
+                                    }`}
+                                  />
                                   <span className="truncate text-sm font-semibold text-gray-900">{log.channelName}</span>
+                                  <span
+                                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                      status === 'unreachable'
+                                        ? 'bg-rose-50 text-rose-700'
+                                        : status === 'abnormal'
+                                          ? 'bg-amber-50 text-amber-700'
+                                          : 'bg-emerald-50 text-emerald-700'
+                                    }`}
+                                  >
+                                    {getLogStatusLabel(log)}
+                                  </span>
                                   <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-800">{log.tps} Tok/s</span>
                                 </div>
                                 <div className="mt-1 truncate text-xs text-gray-500">{log.prompt}</div>
@@ -799,6 +830,16 @@ export default function App() {
                               {tag}
                             </span>
                           ))}
+                          {channel.aiDiagnosticEnabled ? (
+                            <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700">
+                              AI 诊断模型
+                            </span>
+                          ) : null}
+                          {channel.deploymentMode ? (
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                              部署: {channel.deploymentMode}
+                            </span>
+                          ) : null}
                         </div>
 
                         <div className="mt-4 grid gap-3 text-xs text-gray-500 sm:grid-cols-2">
@@ -810,6 +851,12 @@ export default function App() {
                             <span className="font-semibold text-gray-700">最近拨测</span>
                             <div className="mt-1">{channel.lastProbeAt ? formatBeijingTime(channel.lastProbeAt) : '暂无'}</div>
                           </div>
+                          {channel.deploymentConfig ? (
+                            <div className="sm:col-span-2">
+                              <span className="font-semibold text-gray-700">部署配置</span>
+                              <div className="mt-1 line-clamp-3 whitespace-pre-wrap">{channel.deploymentConfig}</div>
+                            </div>
+                          ) : null}
                         </div>
                         {channel.description ? <div className="mt-4 text-xs leading-6 text-gray-500">{channel.description}</div> : null}
                       </div>
@@ -913,9 +960,9 @@ export default function App() {
                       onChange={setLogsFilterStatus}
                       options={[
                         { value: 'all', label: '全部状态' },
-                        { value: 'success', label: '成功' },
-                        { value: 'fail', label: '失败' },
-                        { value: 'violation', label: 'Violation' },
+                        { value: 'normal', label: '正常' },
+                        { value: 'abnormal', label: '异常' },
+                        { value: 'unreachable', label: '不可达' },
                       ]}
                       className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
                     />
@@ -947,7 +994,7 @@ export default function App() {
                   <div className="space-y-3">
                     {filteredLogs.length === 0 ? <EmptyBlock label="所选条件下暂无日志。" /> : null}
                     {filteredLogs.map((log) => {
-                      const hasViolation = log.success && (log.violatedTtft || log.violatedTps || log.violatedExtLatency);
+                      const status = getLogStatus(log);
                       const executionIntervalMinutes = getExecutionIntervalMinutes(log, logs);
                       const task = tasks.find((item) => item.id === log.taskId);
                       const intervalMismatch =
@@ -963,9 +1010,28 @@ export default function App() {
                         >
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className={`h-2 w-2 rounded-full ${!log.success ? 'bg-rose-500' : hasViolation ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                              <span
+                                className={`h-2 w-2 rounded-full ${
+                                  status === 'unreachable'
+                                    ? 'bg-rose-500'
+                                    : status === 'abnormal'
+                                      ? 'bg-amber-400'
+                                      : 'bg-emerald-400'
+                                }`}
+                              />
                               <span className="text-sm font-bold text-gray-900">{log.channelName}</span>
                               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">{log.taskName}</span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                                  status === 'unreachable'
+                                    ? 'bg-rose-50 text-rose-700'
+                                    : status === 'abnormal'
+                                      ? 'bg-amber-50 text-amber-700'
+                                      : 'bg-emerald-50 text-emerald-700'
+                                }`}
+                              >
+                                {getLogStatusLabel(log)}
+                              </span>
                             </div>
                             <div className="mt-2 truncate text-sm text-gray-600">{log.prompt}</div>
                             <div className="mt-2 text-[11px] text-gray-400">{formatBeijingTime(log.timestamp)}</div>
@@ -985,7 +1051,7 @@ export default function App() {
                             <MetricStat label="TPS" value={`${log.tps} Tok/s`} alert={log.violatedTps} />
                             <MetricStat label="TTFT" value={`${log.ttftMs} ms`} alert={log.violatedTtft} />
                             <MetricStat label="E2E" value={`${log.totalLatencyMs} ms`} alert={log.violatedExtLatency} />
-                            <MetricStat label="状态" value={log.success ? 'OK' : `HTTP ${log.statusCode}`} alert={!log.success} />
+                            <MetricStat label="状态" value={getLogStatusLabel(log)} alert={status !== 'normal'} />
                           </div>
                         </button>
                       );

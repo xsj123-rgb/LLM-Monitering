@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -27,6 +27,11 @@ class ModelChannel(Base):
     last_probe_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_ok_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deployment_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    deployment_config: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deployment_env: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deployment_args: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_diagnostic_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     tasks: Mapped[list["ProbeTask"]] = relationship(
         "ProbeTask", back_populates="channel", cascade="all, delete-orphan"

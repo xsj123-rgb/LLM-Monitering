@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
+
+import pytest
 
 os.environ["DATABASE_URL"] = "sqlite:///./backend/tests/test.db"
 os.environ["LG_ADMIN_USERNAME"] = "admin"
@@ -19,13 +22,15 @@ import app.state as app_state
 from app.main import app
 from app.config import get_settings
 from app.core.rate_limit import login_rate_limiter
-from app.core.security import hash_password
+from app.core.security import encrypt_value, hash_password
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.alert import AlertEndpoint, AlertIncident
 from app.models.auth import User, UserSession
 from app.models.monitoring import ModelChannel, ProbeRun, ProbeTask
 from app.services.bootstrap import bootstrap_admin_user
+from app.services import model_discovery as model_discovery_service
+from app.services.provider_endpoints import normalize_openai_chat_endpoint
 from app.services.probe_types import ProbeExecutionResult
 
 
@@ -192,6 +197,257 @@ def test_admin_can_delete_managed_user_but_not_self() -> None:
         assert admin is not None
         self_delete = client.delete(f"/api/auth/users/{admin.id}")
     assert self_delete.status_code == 400
+
+
+def test_discover_models_for_openai_compatible_endpoint(monkeypatch) -> None:
+    async def fake_fetch_models(channel_type: str, api_endpoint: str, api_key: str = "") -> tuple[list[str], str]:
+        assert channel_type == "openai"
+        assert api_endpoint == "http://example.com/v1/chat/completions"
+        assert api_key == "sk-test"
+        return ["deepseek-chat", "qwen3-32b"], "http://example.com/v1/models"
+
+    monkeypatch.setattr(model_discovery_service, "fetch_models", fake_fetch_models)
+    monkeypatch.setattr("app.api.monitoring.fetch_models", fake_fetch_models)
+
+    login()
+
+    response = client.post(
+        "/api/channels/discover-models",
+        json={
+            "apiEndpoint": "http://example.com/v1/chat/completions",
+            "apiKey": "sk-test",
+            "type": "openai",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "models": ["deepseek-chat", "qwen3-32b"],
+        "sourceUrl": "http://example.com/v1/models",
+    }
+
+
+def test_discover_models_for_openai_base_v1_endpoint(monkeypatch) -> None:
+    async def fake_fetch_models(channel_type: str, api_endpoint: str, api_key: str = "") -> tuple[list[str], str]:
+        assert channel_type == "openai"
+        assert api_endpoint == "https://api.siliconflow.cn/v1"
+        assert api_key == "sk-test"
+        return ["Qwen/Qwen3-32B", "deepseek-ai/DeepSeek-V3"], "https://api.siliconflow.cn/v1/models"
+
+    monkeypatch.setattr(model_discovery_service, "fetch_models", fake_fetch_models)
+    monkeypatch.setattr("app.api.monitoring.fetch_models", fake_fetch_models)
+
+    login()
+
+    response = client.post(
+        "/api/channels/discover-models",
+        json={
+            "apiEndpoint": "https://api.siliconflow.cn/v1",
+            "apiKey": "sk-test",
+            "type": "openai",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["sourceUrl"] == "https://api.siliconflow.cn/v1/models"
+
+
+def test_discover_models_for_ollama_endpoint(monkeypatch) -> None:
+    async def fake_fetch_models(channel_type: str, api_endpoint: str, api_key: str = "") -> tuple[list[str], str]:
+        assert channel_type == "ollama"
+        assert api_endpoint == "http://localhost:11434/api/chat"
+        assert api_key == ""
+        return ["llama3.1:8b", "qwen2.5:14b"], "http://localhost:11434/api/tags"
+
+    monkeypatch.setattr(model_discovery_service, "fetch_models", fake_fetch_models)
+    monkeypatch.setattr("app.api.monitoring.fetch_models", fake_fetch_models)
+
+    login()
+
+    response = client.post(
+        "/api/channels/discover-models",
+        json={
+            "apiEndpoint": "http://localhost:11434/api/chat",
+            "apiKey": "",
+            "type": "ollama",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["models"] == ["llama3.1:8b", "qwen2.5:14b"]
+    assert response.json()["sourceUrl"] == "http://localhost:11434/api/tags"
+
+
+def test_normalize_openai_chat_endpoint_supports_base_and_models_paths() -> None:
+    assert (
+        normalize_openai_chat_endpoint("https://api.siliconflow.cn/v1")
+        == "https://api.siliconflow.cn/v1/chat/completions"
+    )
+    assert (
+        normalize_openai_chat_endpoint("https://api.siliconflow.cn/v1/")
+        == "https://api.siliconflow.cn/v1/chat/completions"
+    )
+    assert (
+        normalize_openai_chat_endpoint("https://api.siliconflow.cn/v1/models")
+        == "https://api.siliconflow.cn/v1/chat/completions"
+    )
+    assert (
+        normalize_openai_chat_endpoint("https://api.siliconflow.cn/v1/chat/completions")
+        == "https://api.siliconflow.cn/v1/chat/completions"
+    )
+
+
+def test_openai_probe_adapter_normalizes_base_v1_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.adapters.openai import OpenAICompatibleProbeAdapter
+
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        status = 200
+        headers = {"Content-Type": "text/event-stream"}
+
+        def __init__(self) -> None:
+            self.content = self
+            self._chunks = iter(
+                [
+                    b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+                    b'data: {"usage":{"completion_tokens":2}}\n\n',
+                    b"data: [DONE]\n\n",
+                ]
+            )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def text(self) -> str:
+            return ""
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._chunks)
+            except StopIteration as exc:
+                raise StopAsyncIteration from exc
+
+    class FakeSession:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, *, headers=None, json=None):  # noqa: ANN001
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["json"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("app.adapters.openai.aiohttp.ClientSession", FakeSession)
+    channel = ModelChannel(
+        name="SiliconFlow",
+        api_endpoint="https://api.siliconflow.cn/v1",
+        api_key_encrypted=encrypt_value("sk-test"),
+        model_identifier="Qwen/Qwen3-30B-A3B-Instruct-2507",
+        type="openai",
+        status="active",
+        tags=[],
+    )
+    result = asyncio.run(OpenAICompatibleProbeAdapter().execute(channel, "ping"))
+
+    assert result.success is True
+    assert captured["url"] == "https://api.siliconflow.cn/v1/chat/completions"
+
+
+def test_openai_probe_adapter_ignores_empty_choices_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.adapters.openai import OpenAICompatibleProbeAdapter
+
+    class FakeResponse:
+        status = 200
+        headers = {"Content-Type": "text/event-stream"}
+
+        def __init__(self) -> None:
+            self.content = self
+            self._chunks = iter(
+                [
+                    b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n',
+                    b'data: {"choices":[],"usage":{"completion_tokens":1}}\n\n',
+                    b"data: [DONE]\n\n",
+                ]
+            )
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def text(self) -> str:
+            return ""
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self._chunks)
+            except StopIteration as exc:
+                raise StopAsyncIteration from exc
+
+    class FakeSession:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, *, headers=None, json=None):  # noqa: ANN001, ARG002
+            return FakeResponse()
+
+    monkeypatch.setattr("app.adapters.openai.aiohttp.ClientSession", FakeSession)
+
+    channel = ModelChannel(
+        name="SiliconFlow",
+        api_endpoint="https://api.siliconflow.cn/v1/chat/completions",
+        api_key_encrypted=encrypt_value("sk-test"),
+        model_identifier="Qwen/Qwen3-30B-A3B-Instruct-2507",
+        type="openai",
+        status="active",
+        tags=[],
+    )
+    result = asyncio.run(OpenAICompatibleProbeAdapter().execute(channel, "ping"))
+
+    assert result.success is True
+    assert result.response_excerpt == "hello"
+    assert result.tokens_count == 1
+
+
+def test_create_openai_channel_normalizes_base_v1_endpoint() -> None:
+    login()
+
+    response = client.post(
+        "/api/channels",
+        json={
+            "name": "SiliconFlow",
+            "apiEndpoint": "https://api.siliconflow.cn/v1",
+            "apiKey": "sk-test",
+            "modelIdentifier": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["apiEndpoint"] == "https://api.siliconflow.cn/v1/chat/completions"
 
 
 def test_manual_probe_writes_log_and_creates_incident(monkeypatch) -> None:

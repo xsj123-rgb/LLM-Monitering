@@ -15,12 +15,15 @@ from app.schemas.monitoring import (
     AlertConfigResponse,
     AlertConfigUpdate,
     AlertNotificationResponse,
+    AuditAdviceResponse,
     DashboardSeriesPoint,
     DashboardSummaryResponse,
     DialTaskCreate,
     DialTaskResponse,
     DialTaskUpdate,
     MetricLogResponse,
+    ModelDiscoveryRequest,
+    ModelDiscoveryResponse,
     ModelChannelCreate,
     ModelChannelResponse,
     ModelChannelUpdate,
@@ -28,6 +31,8 @@ from app.schemas.monitoring import (
     ReportPushResponse,
     ReportSummaryResponse,
 )
+from app.services.audit_advice import generate_audit_advices
+from app.services.model_discovery import fetch_models
 from app.services.notifier import build_report_pdf_bytes, send_feishu_report_pdf, send_report_alerts, send_test_alert
 from app.services.probe import execute_probe_task
 from app.services.serialization import (
@@ -120,10 +125,19 @@ def list_channels(db: DBSession, _: CurrentUser):
 def create_channel(payload: ModelChannelCreate, db: DBSession, _: CurrentAdminUser):
     channel = ModelChannel()
     apply_channel_payload(channel, payload.model_dump())
+    if channel.ai_diagnostic_enabled:
+        for item in db.scalars(select(ModelChannel).where(ModelChannel.ai_diagnostic_enabled.is_(True))):
+            item.ai_diagnostic_enabled = False
     db.add(channel)
     db.commit()
     db.refresh(channel)
     return serialize_channel(channel)
+
+
+@router.post("/channels/discover-models", response_model=ModelDiscoveryResponse)
+async def discover_channel_models(payload: ModelDiscoveryRequest, _: CurrentAdminUser):
+    models, source_url = await fetch_models(payload.type, payload.apiEndpoint, payload.apiKey)
+    return ModelDiscoveryResponse(models=models, sourceUrl=source_url)
 
 
 @router.patch("/channels/{channel_id}", response_model=ModelChannelResponse)
@@ -132,6 +146,14 @@ def update_channel(channel_id: str, payload: ModelChannelUpdate, db: DBSession, 
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
     apply_channel_payload(channel, payload.model_dump(exclude_unset=True))
+    if channel.ai_diagnostic_enabled:
+        for item in db.scalars(
+            select(ModelChannel).where(
+                ModelChannel.ai_diagnostic_enabled.is_(True),
+                ModelChannel.id != channel.id,
+            )
+        ):
+            item.ai_diagnostic_enabled = False
     db.commit()
     db.refresh(channel)
     return serialize_channel(channel)
@@ -264,7 +286,7 @@ def list_logs(
     db: DBSession,
     _: CurrentUser,
     channel_id: str | None = None,
-    status: Literal["all", "success", "fail", "violation"] = "all",
+    status: Literal["all", "normal", "abnormal", "unreachable"] = "all",
     range: Literal["all", "1h", "6h", "24h", "7d"] = "all",
     limit: int = Query(default=500, le=1000),
 ):
@@ -272,17 +294,24 @@ def list_logs(
     filters = []
     if channel_id:
         filters.append(ProbeRun.channel_id == channel_id)
-    if status == "success":
-        filters.append(ProbeRun.success.is_(True))
-    elif status == "fail":
-        filters.append(ProbeRun.success.is_(False))
-    elif status == "violation":
+    if status == "normal":
+        filters.append(
+            and_(
+                ProbeRun.success.is_(True),
+                ProbeRun.violated_ttft.is_(False),
+                ProbeRun.violated_tps.is_(False),
+                ProbeRun.violated_ext_latency.is_(False),
+            )
+        )
+    elif status == "abnormal":
         filters.append(
             and_(
                 ProbeRun.success.is_(True),
                 (ProbeRun.violated_ttft.is_(True) | ProbeRun.violated_tps.is_(True) | ProbeRun.violated_ext_latency.is_(True)),
             )
         )
+    elif status == "unreachable":
+        filters.append(ProbeRun.success.is_(False))
     if range != "all":
         now = datetime.utcnow()
         hours_map = {"1h": 1, "6h": 6, "24h": 24, "7d": 24 * 7}
@@ -362,6 +391,26 @@ def report_summary(
     period: Literal["daily", "weekly", "monthly"] = "weekly",
 ):
     return _build_report_summary_payload(db, period)
+
+
+@router.get("/reports/audit-advices", response_model=AuditAdviceResponse)
+async def report_audit_advices(
+    db: DBSession,
+    _: CurrentUser,
+    period: Literal["daily", "weekly", "monthly"] = "weekly",
+):
+    items = await generate_audit_advices(db, period)
+    return AuditAdviceResponse(
+        period=period,
+        items=[
+            {
+                "channelId": item.channel_id,
+                "advice": item.advice,
+                "source": item.source,
+            }
+            for item in items
+        ],
+    )
 
 
 @router.post("/reports/push", response_model=ReportPushResponse)

@@ -9,6 +9,7 @@ import aiohttp
 from app.adapters.base import ProbeAdapter
 from app.core.security import decrypt_value
 from app.models.monitoring import ModelChannel
+from app.services.provider_endpoints import normalize_openai_chat_endpoint
 from app.services.probe_types import ProbeExecutionResult
 
 
@@ -51,12 +52,13 @@ class OpenAICompatibleProbeAdapter(ProbeAdapter):
         api_key = decrypt_value(channel.api_key_encrypted)
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        target_endpoint = normalize_openai_chat_endpoint(channel.api_endpoint)
 
         try:
             timeout = aiohttp.ClientTimeout(total=90)
             connector = aiohttp.TCPConnector(force_close=True, ttl_dns_cache=0)
             async with aiohttp.ClientSession(timeout=timeout, connector=connector, trace_configs=[trace]) as client:
-                async with client.post(channel.api_endpoint, headers=headers, json=request_payload) as resp:
+                async with client.post(target_endpoint, headers=headers, json=request_payload) as resp:
                     if resp.status >= 400:
                         error_body = (await resp.text())[:2048]
                         return ProbeExecutionResult(
@@ -79,11 +81,9 @@ class OpenAICompatibleProbeAdapter(ProbeAdapter):
                                 data = json.loads(payload)
                             except json.JSONDecodeError:
                                 continue
-                            delta = (
-                                data.get("choices", [{}])[0]
-                                .get("delta", {})
-                                .get("content")
-                            )
+                            choices = data.get("choices")
+                            first_choice = choices[0] if isinstance(choices, list) and choices else {}
+                            delta = first_choice.get("delta", {}).get("content") if isinstance(first_choice, dict) else None
                             if delta:
                                 accumulated_text += delta
                                 if ttft_ms == 0:

@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { MetricLog, ModelChannel, DialTask } from '../types';
+import { MetricLog, ModelChannel, DialTask, AuditAdviceItem } from '../types';
 import { CalendarRange, ClipboardCheck, ArrowUpRight, Cpu, HelpCircle, HardDrive, ShieldCheck, Send, Printer, Sliders } from 'lucide-react';
 import { formatBeijingTime } from '../lib/time';
 import { api } from '../lib/api';
@@ -20,6 +20,7 @@ interface AuditReportProps {
 export function AuditReport({ logs, channels, tasks, canManage = true, onTriggerNotify }: AuditReportProps) {
   const [reportPeriod, setReportPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [triggerSending, setTriggerSending] = useState(false);
+  const [auditAdvices, setAuditAdvices] = useState<Record<string, AuditAdviceItem>>({});
 
   // Filter logs dynamically based on the exact timeline selected
   const currentPeriodLogs = React.useMemo(() => {
@@ -68,20 +69,16 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
 
       let healthRating = '优秀';
       let ratingColor = '#10b981'; // emerald
-      let complianceAdvice = '';
 
       if (complianceRate >= 98) {
         healthRating = '卓越以太级 (A级)';
         ratingColor = '#10b981';
-        complianceAdvice = `性能处于绿区（TPS: ${avgTps}Tok/s, 均值TTFT: ${avgTtft}ms, 字间延迟: ${avgItl}ms/字）。各时段吞吐无任何退化，可用性高。健康等级：A。建议：无需硬件改动，维持现有 A100 / GPU 计算单元。`;
       } else if (complianceRate >= 94) {
         healthRating = '良好常规级 (B级)';
         ratingColor = '#eab308'; // amber yellow
-        complianceAdvice = `整体平稳，但在下午高负载时段存在轻微响应抖动（峰值延迟达 ${worstTtft}ms），字间延迟上浮至 ${avgItl}ms。存在轻度队列抢占。建议：可在 QPS 路由层实施限流，或对空闲实例执行常驻保活 warm-up 预热。`;
       } else {
         healthRating = '告警限制级 (C级)';
         ratingColor = '#ef4444'; // rose red
-        complianceAdvice = `触发严重 SLA 性能警报！SLA 达标率跌至 ${complianceRate.toFixed(1)}%，平均字间延迟达 ${avgItl}ms。频繁触发本地 Ollama 推理 Fallback 引起严重延迟（峰值 ${worstTtft}ms）。强特决策建议：开发运维部应立刻追加配置至少 2 块 24G 特异计算卡，避免资源锁死。`;
       }
 
       return {
@@ -95,10 +92,34 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
         worstTtft,
         healthRating,
         ratingColor,
-        complianceAdvice
+        complianceAdvice: auditAdvices[ch.id]?.advice || '当前未启用 AI 建议',
+        adviceSource: auditAdvices[ch.id]?.source || 'disabled',
       };
     });
-  }, [channels, currentPeriodLogs]);
+  }, [channels, currentPeriodLogs, auditAdvices]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadAuditAdvices() {
+      try {
+        const response = await api.reports.auditAdvices(reportPeriod);
+        if (cancelled) return;
+        const nextMap = response.items.reduce<Record<string, AuditAdviceItem>>((acc, item) => {
+          acc[item.channelId] = item;
+          return acc;
+        }, {});
+        setAuditAdvices(nextMap);
+      } catch {
+        if (!cancelled) {
+          setAuditAdvices({});
+        }
+      }
+    }
+    void loadAuditAdvices();
+    return () => {
+      cancelled = true;
+    };
+  }, [reportPeriod]);
 
   const overallSlaScore = channelBreakdown.reduce((acc, b) => acc + b.complianceRate, 0) / Math.max(channelBreakdown.length, 1);
 
@@ -690,7 +711,18 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
                     <ArrowUpRight className="w-3.5 h-3.5" />
                   </span>
                   <div className="min-w-0">
-                    <div className="font-bold tracking-tight">资源健康度评估与针对性建议</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-bold tracking-tight">资源健康度评估与针对性建议</div>
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        item.adviceSource === 'ai'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : item.adviceSource === 'error'
+                            ? 'bg-rose-50 text-rose-700'
+                            : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {item.adviceSource === 'ai' ? 'AI 生成' : item.adviceSource === 'error' ? '生成失败' : '未启用'}
+                      </span>
+                    </div>
                     <p className="mt-1 text-gray-650 leading-5 font-sans">{item.complianceAdvice}</p>
                   </div>
                 </div>

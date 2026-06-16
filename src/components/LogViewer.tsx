@@ -30,6 +30,13 @@ export function LogViewer({ log, onClose, associatedTask, allLogs = [] }: LogVie
   const ttftRejected = associatedTask ? log.ttftMs > associatedTask.thresholds.maxTtftMs : log.violatedTtft;
   const tpsRejected = associatedTask ? log.tps < associatedTask.thresholds.minTps : log.violatedTps;
   const latencyRejected = associatedTask ? log.totalLatencyMs > associatedTask.thresholds.maxTotalLatencyMs : log.violatedExtLatency;
+  const isAbnormal = log.success && (ttftRejected || tpsRejected || latencyRejected);
+  const statusLabel = !log.success ? '不可达' : isAbnormal ? '异常' : '正常';
+  const statusToneClass = !log.success
+    ? 'bg-rose-50 text-rose-700 border-rose-100'
+    : isAbnormal
+      ? 'bg-amber-50 text-amber-700 border-amber-100'
+      : 'bg-emerald-50 text-emerald-700 border-emerald-100';
 
   // Mock Request Payload
   const rawRequestPayload = log.requestPayloadJson || {
@@ -91,15 +98,9 @@ export function LogViewer({ log, onClose, associatedTask, allLogs = [] }: LogVie
             <div>
               <div className="text-[10px] text-gray-400 font-medium">SLA 合规性评估</div>
               <div className="mt-1">
-                {log.success && !ttftRejected && !tpsRejected && !latencyRejected ? (
-                  <span className="bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md font-medium text-[10px] border border-emerald-100">
-                    SLA 达标 (OK)
-                  </span>
-                ) : (
-                  <span className="bg-rose-50 text-rose-700 px-1.5 py-0.5 rounded-md font-medium text-[10px] border border-rose-100">
-                    SLA 超标 (Violation)
-                  </span>
-                )}
+                <span className={`px-1.5 py-0.5 rounded-md font-medium text-[10px] border ${statusToneClass}`}>
+                  {statusLabel}
+                </span>
               </div>
             </div>
           </div>
@@ -248,7 +249,7 @@ export function LogViewer({ log, onClose, associatedTask, allLogs = [] }: LogVie
                 )}
                 {log.success && (
                   <div className="border-t border-slate-800 pt-2 mt-2 text-[9px] text-gray-500 flex justify-between">
-                    <span>HTTP 200 OK</span>
+                    <span>HTTP 200 | {statusLabel}</span>
                     <span>openai-protocol-v1</span>
                   </div>
                 )}

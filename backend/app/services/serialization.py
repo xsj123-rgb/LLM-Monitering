@@ -11,6 +11,7 @@ from app.schemas.monitoring import (
     ModelChannelResponse,
     SLAThresholds,
 )
+from app.services.provider_endpoints import normalize_openai_chat_endpoint
 from app.services.time import as_beijing_time
 
 
@@ -29,6 +30,11 @@ def serialize_channel(channel: ModelChannel) -> ModelChannelResponse:
         lastProbeAt=as_beijing_time(channel.last_probe_at),
         lastOkAt=as_beijing_time(channel.last_ok_at),
         description=channel.description,
+        deploymentMode=channel.deployment_mode,
+        deploymentConfig=channel.deployment_config,
+        deploymentEnv=channel.deployment_env,
+        deploymentArgs=channel.deployment_args,
+        aiDiagnosticEnabled=channel.ai_diagnostic_enabled,
     )
 
 
@@ -49,6 +55,18 @@ def apply_channel_payload(channel: ModelChannel, payload: dict) -> None:
         channel.tags = list(payload["tags"])
     if "description" in payload:
         channel.description = payload["description"]
+    if "deploymentMode" in payload:
+        channel.deployment_mode = payload["deploymentMode"]
+    if "deploymentConfig" in payload:
+        channel.deployment_config = payload["deploymentConfig"]
+    if "deploymentEnv" in payload:
+        channel.deployment_env = payload["deploymentEnv"]
+    if "deploymentArgs" in payload:
+        channel.deployment_args = payload["deploymentArgs"]
+    if "aiDiagnosticEnabled" in payload and payload["aiDiagnosticEnabled"] is not None:
+        channel.ai_diagnostic_enabled = bool(payload["aiDiagnosticEnabled"])
+    if channel.type == "openai" and channel.api_endpoint:
+        channel.api_endpoint = normalize_openai_chat_endpoint(channel.api_endpoint)
 
 
 def serialize_task(task: ProbeTask) -> DialTaskResponse:

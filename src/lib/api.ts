@@ -6,8 +6,29 @@ import type {
   ManagedUser,
   MetricLog,
   ModelChannel,
+  AuditAdviceResponse,
   ReportPushResult,
+  ModelDiscoveryResult,
 } from '../types';
+
+const RAW_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const IS_BROWSER = typeof window !== 'undefined';
+
+function shouldUseConfiguredApiBase(): boolean {
+  if (!RAW_API_BASE_URL || !IS_BROWSER) {
+    return Boolean(RAW_API_BASE_URL);
+  }
+  try {
+    const configured = new URL(RAW_API_BASE_URL, window.location.origin);
+    return configured.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+// In LAN dev mode we prefer same-origin `/api` via Vite proxy, otherwise browsers may
+// reject or fail to persist the session cookie between `:3000` and `:8000`.
+const API_BASE_URL = shouldUseConfiguredApiBase() ? RAW_API_BASE_URL : '';
 
 class ApiError extends Error {
   status: number;
@@ -18,8 +39,13 @@ class ApiError extends Error {
   }
 }
 
+function buildUrl(path: string): string {
+  if (/^https?:\/\//.test(path)) return path;
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(buildUrl(path), {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
@@ -93,6 +119,11 @@ export const api = {
     update: (id: string, channel: Partial<ModelChannel>) =>
       request<ModelChannel>(`/api/channels/${id}`, { method: 'PATCH', body: JSON.stringify(channel) }),
     remove: (id: string) => request<{ ok: boolean }>(`/api/channels/${id}`, { method: 'DELETE' }),
+    discoverModels: (payload: { apiEndpoint: string; apiKey?: string; type: ModelChannel['type'] }) =>
+      request<ModelDiscoveryResult>('/api/channels/discover-models', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
   },
   tasks: {
     list: () => request<DialTask[]>('/api/tasks'),
@@ -129,6 +160,8 @@ export const api = {
   reports: {
     push: (period: 'daily' | 'weekly' | 'monthly') =>
       request<ReportPushResult>(`/api/reports/push?period=${period}`, { method: 'POST' }),
+    auditAdvices: (period: 'daily' | 'weekly' | 'monthly') =>
+      request<AuditAdviceResponse>(`/api/reports/audit-advices?period=${period}`),
   },
 };
 

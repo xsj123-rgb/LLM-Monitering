@@ -14,6 +14,7 @@ TaskStatus = Literal["running", "paused"]
 AlertType = Literal["feishu", "dingtalk", "webhook", "email"]
 AlertStatus = Literal["enabled", "disabled"]
 NotificationStatus = Literal["firing", "resolved"]
+DeploymentMode = Literal["k8s", "docker", "bare_metal", "other"]
 
 
 class SLAThresholds(BaseModel):
@@ -32,6 +33,11 @@ class ModelChannelBase(BaseModel):
     status: ChannelStatus = "active"
     tags: list[str] = Field(default_factory=list)
     description: str | None = None
+    deploymentMode: DeploymentMode | None = None
+    deploymentConfig: str | None = None
+    deploymentEnv: str | None = None
+    deploymentArgs: str | None = None
+    aiDiagnosticEnabled: bool = False
 
 
 class ModelChannelCreate(ModelChannelBase):
@@ -47,6 +53,11 @@ class ModelChannelUpdate(BaseModel):
     status: ChannelStatus | None = None
     tags: list[str] | None = None
     description: str | None = None
+    deploymentMode: DeploymentMode | None = None
+    deploymentConfig: str | None = None
+    deploymentEnv: str | None = None
+    deploymentArgs: str | None = None
+    aiDiagnosticEnabled: bool | None = None
 
 
 class ModelChannelResponse(APIModel):
@@ -63,6 +74,22 @@ class ModelChannelResponse(APIModel):
     lastProbeAt: datetime | None = None
     lastOkAt: datetime | None = None
     description: str | None = None
+    deploymentMode: DeploymentMode | None = None
+    deploymentConfig: str | None = None
+    deploymentEnv: str | None = None
+    deploymentArgs: str | None = None
+    aiDiagnosticEnabled: bool = False
+
+
+class ModelDiscoveryRequest(BaseModel):
+    apiEndpoint: str
+    apiKey: str = ""
+    type: ChannelType
+
+
+class ModelDiscoveryResponse(BaseModel):
+    models: list[str] = Field(default_factory=list)
+    sourceUrl: str | None = None
 
 
 class AlertConfigBase(BaseModel):
@@ -206,6 +233,21 @@ class ReportChannelSummary(BaseModel):
     avgTps: float
     avgItl: float
     worstTtft: int
+
+
+class AuditAdviceRequest(BaseModel):
+    period: Literal["daily", "weekly", "monthly"] = "weekly"
+
+
+class AuditAdviceChannelResponse(BaseModel):
+    channelId: str
+    advice: str
+    source: Literal["ai", "disabled", "error"]
+
+
+class AuditAdviceResponse(BaseModel):
+    period: Literal["daily", "weekly", "monthly"]
+    items: list[AuditAdviceChannelResponse]
 
 
 class ReportSummaryResponse(BaseModel):

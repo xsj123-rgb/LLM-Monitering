@@ -4,6 +4,8 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const backendTarget = process.env.BACKEND_URL || 'http://127.0.0.1:8000';
+
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
@@ -15,15 +17,15 @@ export default defineConfig(() => {
       port: 3000,
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:8000',
+          target: backendTarget,
           changeOrigin: true,
         },
         '/healthz': {
-          target: 'http://127.0.0.1:8000',
+          target: backendTarget,
           changeOrigin: true,
         },
         '/readyz': {
-          target: 'http://127.0.0.1:8000',
+          target: backendTarget,
           changeOrigin: true,
         },
       },
