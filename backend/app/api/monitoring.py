@@ -3,14 +3,18 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.orm import selectinload
 
 from app.dependencies import CurrentAdminUser, CurrentUser, DBSession
 from app.models.alert import AlertEndpoint, AlertIncident
-from app.models.monitoring import ModelChannel, ProbeRun, ProbeTask
+from app.models.monitoring import AIAnalysisConfig, ModelChannel, ProbeRun, ProbeTask
 from app.schemas.monitoring import (
+    AIAnalysisConfigTestRequest,
+    AIAnalysisConfigResponse,
+    AIAnalysisConfigUpdate,
+    AIAnalysisTestResponse,
     AlertConfigCreate,
     AlertConfigResponse,
     AlertConfigUpdate,
@@ -28,17 +32,25 @@ from app.schemas.monitoring import (
     ModelChannelResponse,
     ModelChannelUpdate,
     ReportChannelSummary,
+    ReportPushAdviceItem,
     ReportPushResponse,
     ReportSummaryResponse,
 )
-from app.services.audit_advice import generate_audit_advices
+from app.services.ai_analysis import (
+    ensure_ai_analysis_config,
+    get_audit_advice_snapshot_map,
+    refresh_audit_advices,
+    test_ai_analysis_endpoint,
+)
 from app.services.model_discovery import fetch_models
 from app.services.notifier import build_report_pdf_bytes, send_feishu_report_pdf, send_report_alerts, send_test_alert
 from app.services.probe import execute_probe_task
 from app.services.serialization import (
+    apply_ai_analysis_config_payload,
     apply_alert_payload,
     apply_channel_payload,
     apply_task_payload,
+    serialize_ai_analysis_config,
     serialize_alert,
     serialize_channel,
     serialize_incident,
@@ -125,9 +137,6 @@ def list_channels(db: DBSession, _: CurrentUser):
 def create_channel(payload: ModelChannelCreate, db: DBSession, _: CurrentAdminUser):
     channel = ModelChannel()
     apply_channel_payload(channel, payload.model_dump())
-    if channel.ai_diagnostic_enabled:
-        for item in db.scalars(select(ModelChannel).where(ModelChannel.ai_diagnostic_enabled.is_(True))):
-            item.ai_diagnostic_enabled = False
     db.add(channel)
     db.commit()
     db.refresh(channel)
@@ -146,14 +155,6 @@ def update_channel(channel_id: str, payload: ModelChannelUpdate, db: DBSession, 
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
     apply_channel_payload(channel, payload.model_dump(exclude_unset=True))
-    if channel.ai_diagnostic_enabled:
-        for item in db.scalars(
-            select(ModelChannel).where(
-                ModelChannel.ai_diagnostic_enabled.is_(True),
-                ModelChannel.id != channel.id,
-            )
-        ):
-            item.ai_diagnostic_enabled = False
     db.commit()
     db.refresh(channel)
     return serialize_channel(channel)
@@ -173,6 +174,60 @@ def delete_channel(channel_id: str, db: DBSession, _: CurrentAdminUser):
 def list_tasks(db: DBSession, _: CurrentUser):
     tasks = list(db.scalars(select(ProbeTask).order_by(ProbeTask.created_at.desc())))
     return [serialize_task(task) for task in tasks]
+
+
+@router.get("/system/ai-analysis", response_model=AIAnalysisConfigResponse)
+def get_ai_analysis_config(db: DBSession, _: CurrentAdminUser):
+    config = ensure_ai_analysis_config(db)
+    return serialize_ai_analysis_config(config)
+
+
+@router.put("/system/ai-analysis", response_model=AIAnalysisConfigResponse)
+async def update_ai_analysis_config(payload: AIAnalysisConfigUpdate, db: DBSession, _: CurrentAdminUser):
+    config = ensure_ai_analysis_config(db)
+    apply_ai_analysis_config_payload(config, payload.model_dump())
+    db.commit()
+    db.refresh(config)
+    if config.enabled:
+        await refresh_audit_advices(db, config, config.schedule_mode)
+        db.refresh(config)
+    return serialize_ai_analysis_config(config)
+
+
+@router.post("/system/ai-analysis/test", response_model=AIAnalysisTestResponse)
+async def test_ai_analysis_config(
+    *,
+    payload: AIAnalysisConfigTestRequest | None = Body(default=None),
+    db: DBSession,
+    _: CurrentAdminUser,
+):
+    config = ensure_ai_analysis_config(db)
+    test_config = config
+    if payload is not None:
+        test_config = AIAnalysisConfig(
+            enabled=config.enabled,
+            provider_type=config.provider_type,
+            api_endpoint=config.api_endpoint,
+            api_key_encrypted=config.api_key_encrypted,
+            model_identifier=config.model_identifier,
+            schedule_mode=config.schedule_mode,
+            status=config.status,
+            last_run_at=config.last_run_at,
+            last_success_at=config.last_success_at,
+            last_error=config.last_error,
+        )
+        apply_ai_analysis_config_payload(test_config, payload.model_dump())
+    try:
+        message = await test_ai_analysis_endpoint(test_config)
+        config.status = "healthy"
+        config.last_error = None
+        db.commit()
+        return AIAnalysisTestResponse(ok=True, status="healthy", message=message)
+    except Exception as exc:
+        config.status = "error"
+        config.last_error = str(exc)
+        db.commit()
+        return AIAnalysisTestResponse(ok=False, status="error", message=str(exc))
 
 
 @router.post("/tasks", response_model=DialTaskResponse)
@@ -399,17 +454,49 @@ async def report_audit_advices(
     _: CurrentUser,
     period: Literal["daily", "weekly", "monthly"] = "weekly",
 ):
-    items = await generate_audit_advices(db, period)
+    config = ensure_ai_analysis_config(db)
+    channels = list(db.scalars(select(ModelChannel).order_by(ModelChannel.created_at.desc())))
+    snapshot_map = get_audit_advice_snapshot_map(db, period)
+    items = []
+    for channel in channels:
+        snapshot = snapshot_map.get(channel.id)
+        if not config.enabled:
+            items.append(
+                {
+                    "channelId": channel.id,
+                    "advice": "当前未启用 AI 建议",
+                    "source": "disabled",
+                    "generatedAt": None,
+                    "analysisModelName": None,
+                    "errorMessage": None,
+                }
+            )
+            continue
+        if snapshot is None:
+            items.append(
+                {
+                    "channelId": channel.id,
+                    "advice": "AI 建议生成中，请稍后刷新",
+                    "source": "loading",
+                    "generatedAt": None,
+                    "analysisModelName": config.model_identifier or None,
+                    "errorMessage": None,
+                }
+            )
+            continue
+        items.append(
+            {
+                "channelId": channel.id,
+                "advice": snapshot.advice,
+                "source": snapshot.source,
+                "generatedAt": as_beijing_time(snapshot.generated_at),
+                "analysisModelName": snapshot.analysis_model_name,
+                "errorMessage": snapshot.error_message,
+            }
+        )
     return AuditAdviceResponse(
         period=period,
-        items=[
-            {
-                "channelId": item.channel_id,
-                "advice": item.advice,
-                "source": item.source,
-            }
-            for item in items
-        ],
+        items=items,
     )
 
 
@@ -432,7 +519,36 @@ async def push_report(
 
     summary = _build_report_summary_payload(db, period)
     weakest_channels = sorted(summary.channels, key=lambda item: item.complianceRate)[:3]
+    channels = list(db.scalars(select(ModelChannel).order_by(ModelChannel.created_at.desc())))
+    snapshot_map = get_audit_advice_snapshot_map(db, period)
     period_labels = {"daily": "日报", "weekly": "周报", "monthly": "月报"}
+    report_advices = [
+        ReportPushAdviceItem(
+            channelId=channel.id,
+            channelName=channel.name,
+            advice=(
+                snapshot_map[channel.id].advice
+                if channel.id in snapshot_map
+                else "AI 建议生成中，请稍后刷新"
+            ),
+            source=(
+                snapshot_map[channel.id].source
+                if channel.id in snapshot_map
+                else "loading"
+            ),
+            generatedAt=(
+                as_beijing_time(snapshot_map[channel.id].generated_at)
+                if channel.id in snapshot_map
+                else None
+            ),
+            analysisModelName=(
+                snapshot_map[channel.id].analysis_model_name
+                if channel.id in snapshot_map
+                else None
+            ),
+        )
+        for channel in channels
+    ]
     payload = {
         "kind": "report",
         "periodLabel": period_labels[period],
@@ -453,6 +569,7 @@ async def push_report(
             }
             for item in weakest_channels
         ],
+        "reportAdvices": [item.model_dump() for item in report_advices],
     }
     result = await send_report_alerts(endpoints, payload)
     if result["deliveredCount"] == 0:

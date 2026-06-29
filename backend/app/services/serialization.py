@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from app.core.security import decrypt_value, encrypt_value
 from app.models.alert import AlertEndpoint, AlertIncident
-from app.models.monitoring import ModelChannel, ProbeRun, ProbeTask
+from app.models.monitoring import AIAnalysisConfig, ModelChannel, ProbeRun, ProbeTask
 from app.schemas.monitoring import (
+    AIAnalysisConfigResponse,
     AlertConfigResponse,
     AlertNotificationResponse,
     DialTaskResponse,
@@ -38,6 +39,23 @@ def serialize_channel(channel: ModelChannel) -> ModelChannelResponse:
     )
 
 
+def serialize_ai_analysis_config(config: AIAnalysisConfig) -> AIAnalysisConfigResponse:
+    return AIAnalysisConfigResponse(
+        enabled=config.enabled,
+        providerType=config.provider_type,
+        apiEndpoint=config.api_endpoint,
+        apiKey=decrypt_value(config.api_key_encrypted),
+        modelIdentifier=config.model_identifier,
+        scheduleMode=config.schedule_mode,
+        status=config.status,
+        lastRunAt=as_beijing_time(config.last_run_at),
+        lastSuccessAt=as_beijing_time(config.last_success_at),
+        lastError=config.last_error,
+        createdAt=as_beijing_time(config.created_at),
+        updatedAt=as_beijing_time(config.updated_at),
+    )
+
+
 def apply_channel_payload(channel: ModelChannel, payload: dict) -> None:
     if "name" in payload and payload["name"] is not None:
         channel.name = payload["name"]
@@ -67,6 +85,21 @@ def apply_channel_payload(channel: ModelChannel, payload: dict) -> None:
         channel.ai_diagnostic_enabled = bool(payload["aiDiagnosticEnabled"])
     if channel.type == "openai" and channel.api_endpoint:
         channel.api_endpoint = normalize_openai_chat_endpoint(channel.api_endpoint)
+
+
+def apply_ai_analysis_config_payload(config: AIAnalysisConfig, payload: dict) -> None:
+    if "enabled" in payload and payload["enabled"] is not None:
+        config.enabled = bool(payload["enabled"])
+    if "providerType" in payload and payload["providerType"] is not None:
+        config.provider_type = payload["providerType"]
+    if "apiEndpoint" in payload and payload["apiEndpoint"] is not None:
+        config.api_endpoint = normalize_openai_chat_endpoint(payload["apiEndpoint"])
+    if "apiKey" in payload and payload["apiKey"] is not None:
+        config.api_key_encrypted = encrypt_value(payload["apiKey"])
+    if "modelIdentifier" in payload and payload["modelIdentifier"] is not None:
+        config.model_identifier = payload["modelIdentifier"]
+    if "scheduleMode" in payload and payload["scheduleMode"] is not None:
+        config.schedule_mode = payload["scheduleMode"]
 
 
 def serialize_task(task: ProbeTask) -> DialTaskResponse:

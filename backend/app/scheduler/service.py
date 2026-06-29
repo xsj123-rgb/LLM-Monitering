@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.monitoring import ProbeTask
+from app.services.ai_analysis import ensure_ai_analysis_config, refresh_audit_advices
 from app.services.probe import execute_probe_task
 
 
@@ -36,6 +37,7 @@ class ProbeScheduler:
                 tasks = list(db.scalars(select(ProbeTask).where(ProbeTask.status == "running")))
                 for task in tasks:
                     self._register_task(task)
+            self._register_ai_analysis_jobs()
 
     async def sync_task(self, task_id: str) -> None:
         async with self._lock:
@@ -63,6 +65,22 @@ class ProbeScheduler:
             max_instances=1,
         )
 
+    def _register_ai_analysis_jobs(self) -> None:
+        schedules = {
+            "daily": 24 * 60,
+            "weekly": 7 * 24 * 60,
+            "monthly": 30 * 24 * 60,
+        }
+        for period, interval_minutes in schedules.items():
+            self._scheduler.add_job(
+                self._run_ai_analysis_job,
+                IntervalTrigger(minutes=interval_minutes, start_date=datetime.now(UTC)),
+                id=f"ai-analysis:{period}",
+                kwargs={"period": period},
+                replace_existing=True,
+                max_instances=1,
+            )
+
     async def _run_task_job(self, task_id: str) -> None:
         if task_id in self._running_task_ids:
             return
@@ -78,3 +96,20 @@ class ProbeScheduler:
                 await self._on_error(exc)
         finally:
             self._running_task_ids.discard(task_id)
+
+    async def _run_ai_analysis_job(self, period: str) -> None:
+        job_key = f"ai-analysis:{period}"
+        if job_key in self._running_task_ids:
+            return
+        self._running_task_ids.add(job_key)
+        try:
+            with self._session_factory() as db:
+                config = ensure_ai_analysis_config(db)
+                if not config.enabled:
+                    return
+                await refresh_audit_advices(db, config, period)  # type: ignore[arg-type]
+        except Exception as exc:
+            if self._on_error:
+                await self._on_error(exc)
+        finally:
+            self._running_task_ids.discard(job_key)

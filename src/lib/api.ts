@@ -1,4 +1,6 @@
 import type {
+  AIAnalysisConfig,
+  AIAnalysisTestResult,
   AlertConfig,
   AlertNotification,
   AuthStatus,
@@ -162,6 +164,33 @@ export const api = {
       request<ReportPushResult>(`/api/reports/push?period=${period}`, { method: 'POST' }),
     auditAdvices: (period: 'daily' | 'weekly' | 'monthly') =>
       request<AuditAdviceResponse>(`/api/reports/audit-advices?period=${period}`),
+  },
+  system: {
+    getAIAnalysisConfig: () => request<AIAnalysisConfig>('/api/system/ai-analysis'),
+    updateAIAnalysisConfig: (payload: {
+      enabled: boolean;
+      providerType: 'openai-compatible';
+      apiEndpoint: string;
+      apiKey: string;
+      modelIdentifier: string;
+      scheduleMode: 'daily' | 'weekly' | 'monthly';
+    }) =>
+      request<AIAnalysisConfig>('/api/system/ai-analysis', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    testAIAnalysisConfig: (payload?: {
+      enabled: boolean;
+      providerType: 'openai-compatible';
+      apiEndpoint: string;
+      apiKey: string;
+      modelIdentifier: string;
+      scheduleMode: 'daily' | 'weekly' | 'monthly';
+    }) =>
+      request<AIAnalysisTestResult>('/api/system/ai-analysis/test', {
+        method: 'POST',
+        body: payload ? JSON.stringify(payload) : undefined,
+      }),
   },
 };
 

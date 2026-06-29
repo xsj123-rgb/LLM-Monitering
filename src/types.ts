@@ -29,6 +29,27 @@ export interface ModelDiscoveryResult {
   sourceUrl?: string | null;
 }
 
+export interface AIAnalysisConfig {
+  enabled: boolean;
+  providerType: 'openai-compatible';
+  apiEndpoint: string;
+  apiKey: string;
+  modelIdentifier: string;
+  scheduleMode: 'daily' | 'weekly' | 'monthly';
+  status: 'idle' | 'running' | 'healthy' | 'error';
+  lastRunAt?: string | null;
+  lastSuccessAt?: string | null;
+  lastError?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AIAnalysisTestResult {
+  ok: boolean;
+  status: 'idle' | 'running' | 'healthy' | 'error';
+  message: string;
+}
+
 export interface SLAThresholds {
   maxTtftMs: number; // Maximum Time to First Token, e.g. 800ms
   minTps: number;    // Minimum Tokens per Second, e.g. 25
@@ -128,7 +149,10 @@ export interface ReportPushResult {
 export interface AuditAdviceItem {
   channelId: string;
   advice: string;
-  source: 'ai' | 'disabled' | 'error';
+  source: 'ai' | 'template' | 'disabled' | 'error' | 'loading';
+  generatedAt?: string | null;
+  analysisModelName?: string | null;
+  errorMessage?: string | null;
 }
 
 export interface AuditAdviceResponse {

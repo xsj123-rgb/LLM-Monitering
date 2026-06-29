@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   Bell,
+  Bot,
   ChevronRight,
   Clock,
   Cpu,
@@ -26,6 +27,7 @@ import { api, ApiError } from './lib/api';
 import { formatProbeTrigger, getExecutionIntervalMinutes } from './lib/logs';
 import { formatBeijingTime } from './lib/time';
 import type {
+  AIAnalysisConfig,
   AlertConfig,
   AlertNotification,
   AuthUser,
@@ -45,8 +47,9 @@ import { AuditReport } from './components/AuditReport';
 import { UserManagementPanel } from './components/UserManagementPanel';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { AppSelect } from './components/AppSelect';
+import { AIAnalysisConfigPanel } from './components/AIAnalysisConfigPanel';
 
-type ActiveTab = 'dashboard' | 'channels' | 'tasks' | 'logs' | 'alerts' | 'report' | 'users';
+type ActiveTab = 'dashboard' | 'channels' | 'tasks' | 'logs' | 'alerts' | 'report' | 'users' | 'ai-analysis';
 type Toast = {
   id: string;
   title: string;
@@ -100,8 +103,10 @@ export default function App() {
   const [logs, setLogs] = useState<MetricLog[]>([]);
   const [notifications, setNotifications] = useState<AlertNotification[]>([]);
   const [managedUsers, setManagedUsers] = useState<ManagedUser[]>([]);
+  const [aiAnalysisConfig, setAiAnalysisConfig] = useState<AIAnalysisConfig | null>(null);
   const [loadingData, setLoadingData] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadingAiAnalysis, setLoadingAiAnalysis] = useState(false);
   const [selectedDiagnosticLog, setSelectedDiagnosticLog] = useState<MetricLog | null>(null);
 
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
@@ -158,6 +163,26 @@ export default function App() {
     }
   };
 
+  const loadAIAnalysisConfig = async (role: AuthUser['role'] | null = user?.role ?? null) => {
+    if (role !== 'admin') {
+      setAiAnalysisConfig(null);
+      return;
+    }
+    setLoadingAiAnalysis(true);
+    try {
+      const nextConfig = await api.system.getAIAnalysisConfig();
+      setAiAnalysisConfig(nextConfig);
+    } catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        setAiAnalysisConfig(null);
+        return;
+      }
+      addToast('AI 配置加载失败', error instanceof Error ? error.message : '未知错误', 'error');
+    } finally {
+      setLoadingAiAnalysis(false);
+    }
+  };
+
   const loadUsers = async (role: AuthUser['role'] | null = user?.role ?? null) => {
     if (role !== 'admin') {
       setManagedUsers([]);
@@ -187,7 +212,6 @@ export default function App() {
         if (auth.authenticated && auth.user) {
           setUser(auth.user);
           await loadData();
-          await loadUsers(auth.user.role);
         }
       } catch (error) {
         if (!cancelled) {
@@ -226,8 +250,13 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setManagedUsers([]);
+      setAiAnalysisConfig(null);
+      return;
+    }
     void loadUsers(user.role);
+    void loadAIAnalysisConfig(user.role);
   }, [user]);
 
   const handleLogin = async (username: string, password: string) => {
@@ -262,6 +291,7 @@ export default function App() {
     setNotifications([]);
     setSelectedDiagnosticLog(null);
     setManagedUsers([]);
+    setAiAnalysisConfig(null);
   };
 
   const handleChangePassword = async (currentPassword: string, newPassword: string) => {
@@ -478,6 +508,49 @@ export default function App() {
     }
   };
 
+  const handleSaveAIAnalysisConfig = async (payload: {
+    enabled: boolean;
+    providerType: 'openai-compatible';
+    apiEndpoint: string;
+    apiKey: string;
+    modelIdentifier: string;
+    scheduleMode: 'daily' | 'weekly' | 'monthly';
+  }) => {
+    try {
+      const nextConfig = await api.system.updateAIAnalysisConfig(payload);
+      setAiAnalysisConfig(nextConfig);
+      addToast('AI 配置已保存', '平台级 AI 诊断入口已更新，并已触发建议缓存刷新。', 'success');
+    } catch (error) {
+      addToast('AI 配置保存失败', error instanceof Error ? error.message : '未知错误', 'error');
+      throw error;
+    }
+  };
+
+  const handleTestAIAnalysisConfig = async (payload: {
+    enabled: boolean;
+    providerType: 'openai-compatible';
+    apiEndpoint: string;
+    apiKey: string;
+    modelIdentifier: string;
+    scheduleMode: 'daily' | 'weekly' | 'monthly';
+  }) => {
+    try {
+      const result = await api.system.testAIAnalysisConfig(payload);
+      setAiAnalysisConfig((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          status: result.status,
+          lastError: result.ok ? null : result.message,
+        };
+      });
+      addToast(result.ok ? 'AI 连通性正常' : 'AI 连通性异常', result.message, result.ok ? 'success' : 'error');
+    } catch (error) {
+      addToast('AI 测试失败', error instanceof Error ? error.message : '未知错误', 'error');
+      throw error;
+    }
+  };
+
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
       if (logsFilterChannel && log.channelId !== logsFilterChannel) return false;
@@ -632,6 +705,7 @@ export default function App() {
               <MobileTab label="时序日志" active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} />
               <MobileTab label="告警终端" active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')} />
               <MobileTab label="合规审计" active={activeTab === 'report'} onClick={() => setActiveTab('report')} />
+              {isAdmin ? <MobileTab label="AI诊断" active={activeTab === 'ai-analysis'} onClick={() => setActiveTab('ai-analysis')} /> : null}
               {isAdmin ? <MobileTab label="账号管理" active={activeTab === 'users'} onClick={() => setActiveTab('users')} /> : null}
             </div>
 
@@ -830,11 +904,6 @@ export default function App() {
                               {tag}
                             </span>
                           ))}
-                          {channel.aiDiagnosticEnabled ? (
-                            <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-medium text-violet-700">
-                              AI 诊断模型
-                            </span>
-                          ) : null}
                           {channel.deploymentMode ? (
                             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-700">
                               部署: {channel.deploymentMode}
@@ -1179,6 +1248,15 @@ export default function App() {
                 </section>
               ) : null}
 
+              {activeTab === 'ai-analysis' && isAdmin ? (
+                <AIAnalysisConfigPanel
+                  config={aiAnalysisConfig}
+                  isLoading={loadingAiAnalysis}
+                  onSave={handleSaveAIAnalysisConfig}
+                  onTest={handleTestAIAnalysisConfig}
+                />
+              ) : null}
+
               {activeTab === 'users' && isAdmin ? (
                 <section className="space-y-6">
                   <PageHeader title="账号管理" description="维护管理员与普通用户账号，支持重置密码、启停账号和删除账号。" />
@@ -1296,6 +1374,7 @@ function SidebarNav({
         <div className="mt-8">
           <p className="mb-4 text-[11px] font-bold uppercase tracking-widest text-gray-400">系统设置</p>
           <ul className="space-y-2">
+            <SidebarButton label="AI 诊断配置" icon={<Bot className="h-4 w-4" />} active={activeTab === 'ai-analysis'} onClick={() => onChange('ai-analysis')} />
             <SidebarButton label="账号管理" icon={<UserRound className="h-4 w-4" />} active={activeTab === 'users'} onClick={() => onChange('users')} />
           </ul>
         </div>

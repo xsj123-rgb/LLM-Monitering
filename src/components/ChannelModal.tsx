@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ModelChannel } from '../types';
-import { X, Cpu, Key, Link2, Tag, Percent, Sparkles, ServerCog, RefreshCw, ListChecks } from 'lucide-react';
+import { X, Cpu, Key, Link2, Tag, Percent, ServerCog, RefreshCw, ListChecks } from 'lucide-react';
 import { AppSelect } from './AppSelect';
 import { api, ApiError } from '../lib/api';
 
@@ -29,7 +29,6 @@ export function ChannelModal({ isOpen, onClose, onSave, channel }: ChannelModalP
   const [deploymentConfig, setDeploymentConfig] = useState('');
   const [deploymentEnv, setDeploymentEnv] = useState('');
   const [deploymentArgs, setDeploymentArgs] = useState('');
-  const [aiDiagnosticEnabled, setAiDiagnosticEnabled] = useState(false);
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
   const [discoverySourceUrl, setDiscoverySourceUrl] = useState<string | null>(null);
   const [discoveringModels, setDiscoveringModels] = useState(false);
@@ -50,7 +49,6 @@ export function ChannelModal({ isOpen, onClose, onSave, channel }: ChannelModalP
       setDeploymentConfig(channel.deploymentConfig || '');
       setDeploymentEnv(channel.deploymentEnv || '');
       setDeploymentArgs(channel.deploymentArgs || '');
-      setAiDiagnosticEnabled(Boolean(channel.aiDiagnosticEnabled));
       setDiscoveredModels(channel.modelIdentifier ? [channel.modelIdentifier] : []);
       setDiscoverySourceUrl(null);
       setDiscoveryError(null);
@@ -67,7 +65,6 @@ export function ChannelModal({ isOpen, onClose, onSave, channel }: ChannelModalP
       setDeploymentConfig('');
       setDeploymentEnv('');
       setDeploymentArgs('');
-      setAiDiagnosticEnabled(false);
       setDiscoveredModels([]);
       setDiscoverySourceUrl(null);
       setDiscoveryError(null);
@@ -148,7 +145,6 @@ export function ChannelModal({ isOpen, onClose, onSave, channel }: ChannelModalP
       deploymentConfig,
       deploymentEnv,
       deploymentArgs,
-      aiDiagnosticEnabled,
     });
     onClose();
   };
@@ -389,22 +385,6 @@ export function ChannelModal({ isOpen, onClose, onSave, channel }: ChannelModalP
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl"
                 />
               </div>
-
-              <label className="col-span-2 flex items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3">
-                <div className="flex items-start gap-2">
-                  <Sparkles className="w-4 h-4 text-blue-600 mt-0.5" />
-                  <div>
-                    <div className="text-xs font-semibold text-slate-900">设为智能诊断建议模型</div>
-                    <div className="text-[11px] leading-5 text-slate-500">SLA 合规审计会调用该渠道的模型接口，结合部署信息生成自然语言建议。</div>
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={aiDiagnosticEnabled}
-                  onChange={e => setAiDiagnosticEnabled(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-brand focus:ring-brand"
-                />
-              </label>
             </div>
 
             <div>

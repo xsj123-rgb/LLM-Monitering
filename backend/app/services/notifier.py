@@ -217,6 +217,7 @@ async def _send_feishu_file_message(
 
 
 def build_report_pdf_bytes(payload: dict) -> bytes:
+    report_advices = payload.get("reportAdvices", [])
     lines = [
         "LLM-Guardian SLA Report",
         "",
@@ -240,6 +241,23 @@ def build_report_pdf_bytes(payload: dict) -> bytes:
             )
     else:
         lines.append("No weak channels identified.")
+
+    lines.extend(["", "Platform AI Resource Health Advice:"])
+    if report_advices:
+        for index, item in enumerate(report_advices, start=1):
+            source = str(item.get("source", "loading"))
+            source_label = {
+                "ai": "AI 建议",
+                "template": "规则模板",
+                "disabled": "未启用",
+                "loading": "生成中",
+                "error": "异常",
+            }.get(source, source)
+            lines.append(
+                f"{index}. {item.get('channelName', '-')} | {source_label} | {shorten(str(item.get('advice', '-')), width=140, placeholder='...')}"
+            )
+    else:
+        lines.append("No platform AI advice available.")
 
     text = "\n".join(lines)
     return _build_minimal_pdf(text)
@@ -297,6 +315,53 @@ def _build_webhook_body(endpoint_type: str, payload: dict) -> dict:
 
 
 def _build_feishu_card(payload: dict) -> dict:
+    def _advice_source_label(source: str) -> str:
+        return {
+            "ai": "AI 建议",
+            "template": "规则模板",
+            "disabled": "未启用",
+            "loading": "生成中",
+            "error": "异常",
+        }.get(source, source)
+
+    def _build_report_advice_elements(report_advices: list[dict]) -> list[dict]:
+        if not report_advices:
+            return [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": "**平台 AI 资源健康诊断建议**\n当前无可附带的平台 AI 资源健康诊断建议。",
+                    },
+                }
+            ]
+
+        elements: list[dict] = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "**平台 AI 资源健康诊断建议**",
+                },
+            }
+        ]
+        for index, item in enumerate(report_advices, start=1):
+            channel_name = str(item.get("channelName", "-"))
+            source_label = _advice_source_label(str(item.get("source", "loading")))
+            advice = shorten(str(item.get("advice", "-")), width=180, placeholder="...")
+            model_name = str(item.get("analysisModelName") or "").strip()
+            meta = f" | 分析模型 {model_name}" if model_name else ""
+            elements.append(
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"{index}. **{channel_name}** [{source_label}]{meta}\n{advice}",
+                    },
+                }
+            )
+        return elements
+
     if payload.get("kind") == "test":
         return {
             "msg_type": "interactive",
@@ -335,13 +400,13 @@ def _build_feishu_card(payload: dict) -> dict:
     if payload.get("kind") == "report":
         period_label = payload.get("periodLabel", "周期报告")
         weakest_channels = payload.get("weakestChannels", [])
+        report_advices = payload.get("reportAdvices", [])
         weakest_lines = "\n".join(
             [
                 f"{index}. {item.get('channelName', '-')} | SLA {item.get('complianceRate', 0):.2f}% | 成功率 {item.get('successRate', 0):.2f}%"
                 for index, item in enumerate(weakest_channels, start=1)
             ]
         ) or "暂无低 SLA 节点，整体运行平稳。"
-
         return {
             "msg_type": "interactive",
             "card": {
@@ -395,6 +460,8 @@ def _build_feishu_card(payload: dict) -> dict:
                             "content": f"**重点关注节点**\n{weakest_lines}",
                         },
                     },
+                    {"tag": "hr"},
+                    *_build_report_advice_elements(report_advices),
                     {
                         "tag": "note",
                         "elements": [

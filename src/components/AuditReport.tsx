@@ -94,6 +94,9 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
         ratingColor,
         complianceAdvice: auditAdvices[ch.id]?.advice || '当前未启用 AI 建议',
         adviceSource: auditAdvices[ch.id]?.source || 'disabled',
+        adviceGeneratedAt: auditAdvices[ch.id]?.generatedAt || null,
+        adviceModelName: auditAdvices[ch.id]?.analysisModelName || null,
+        adviceErrorMessage: auditAdvices[ch.id]?.errorMessage || null,
       };
     });
   }, [channels, currentPeriodLogs, auditAdvices]);
@@ -704,7 +707,7 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
                 </div>
               </div>
 
-              {/* Capacity decision advice */}
+              {/* Platform AI advice */}
               <div className="mt-4 rounded-2xl border border-blue-100/80 bg-gradient-to-r from-blue-50/80 via-white to-cyan-50/60 px-4 py-3 text-[11px] text-blue-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] font-sans">
                 <div className="flex items-start gap-2.5">
                   <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-brand shadow-xs ring-1 ring-blue-100">
@@ -712,16 +715,34 @@ export function AuditReport({ logs, channels, tasks, canManage = true, onTrigger
                   </span>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <div className="font-bold tracking-tight">资源健康度评估与针对性建议</div>
+                      <div className="font-bold tracking-tight">平台 AI 资源健康诊断建议</div>
                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                         item.adviceSource === 'ai'
                           ? 'bg-emerald-50 text-emerald-700'
+                          : item.adviceSource === 'template'
+                            ? 'bg-amber-50 text-amber-700'
                           : item.adviceSource === 'error'
                             ? 'bg-rose-50 text-rose-700'
+                            : item.adviceSource === 'loading'
+                              ? 'bg-blue-50 text-blue-700'
                             : 'bg-slate-100 text-slate-600'
                       }`}>
-                        {item.adviceSource === 'ai' ? 'AI 生成' : item.adviceSource === 'error' ? '生成失败' : '未启用'}
+                        {item.adviceSource === 'ai'
+                          ? 'AI 已生成'
+                          : item.adviceSource === 'template'
+                            ? '规则模板'
+                          : item.adviceSource === 'error'
+                            ? '生成失败'
+                            : item.adviceSource === 'loading'
+                              ? '生成中'
+                              : '未启用'}
                       </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                      {item.adviceModelName ? <span>分析模型：{item.adviceModelName}</span> : null}
+                      {item.adviceGeneratedAt ? <span>生成时间：{formatBeijingTime(item.adviceGeneratedAt)}</span> : null}
+                      {item.adviceSource === 'template' ? <span>AI 生成失败，已自动切换为规则模板摘要</span> : null}
+                      {!item.adviceModelName && !item.adviceGeneratedAt ? <span>由平台级第三方 AI 分析入口统一生成</span> : null}
                     </div>
                     <p className="mt-1 text-gray-650 leading-5 font-sans">{item.complianceAdvice}</p>
                   </div>

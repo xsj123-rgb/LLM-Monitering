@@ -13,7 +13,7 @@ from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.scheduler.service import ProbeScheduler
 from app.services.bootstrap import bootstrap_admin_user
-from app.services.db_migration import ensure_auth_columns, ensure_channel_deployment_columns
+from app.services.db_migration import ensure_ai_analysis_tables, ensure_auth_columns, ensure_channel_deployment_columns
 from app.state import scheduler as scheduler_state
 import app.state as app_state
 
@@ -25,6 +25,7 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_auth_columns(engine)
     ensure_channel_deployment_columns(engine)
+    ensure_ai_analysis_tables(engine)
     with SessionLocal() as db:
         bootstrap_admin_user(db, settings)
     scheduler = ProbeScheduler(SessionLocal)

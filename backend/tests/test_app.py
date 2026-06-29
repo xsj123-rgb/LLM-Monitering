@@ -27,9 +27,10 @@ from app.db.base import Base
 from app.db.session import SessionLocal, engine
 from app.models.alert import AlertEndpoint, AlertIncident
 from app.models.auth import User, UserSession
-from app.models.monitoring import ModelChannel, ProbeRun, ProbeTask
+from app.models.monitoring import AIAnalysisConfig, AuditAdviceSnapshot, ModelChannel, ProbeRun, ProbeTask
 from app.services.bootstrap import bootstrap_admin_user
 from app.services import model_discovery as model_discovery_service
+from app.services import ai_analysis as ai_analysis_service
 from app.services.provider_endpoints import normalize_openai_chat_endpoint
 from app.services.probe_types import ProbeExecutionResult
 
@@ -77,6 +78,8 @@ def setup_function() -> None:
         db.execute(delete(ProbeTask))
         db.execute(delete(ModelChannel))
         db.execute(delete(AlertEndpoint))
+        db.execute(delete(AuditAdviceSnapshot))
+        db.execute(delete(AIAnalysisConfig))
         db.execute(delete(UserSession))
         admin = db.scalar(select(User).where(User.username == "admin"))
         if admin:
@@ -448,6 +451,261 @@ def test_create_openai_channel_normalizes_base_v1_endpoint() -> None:
 
     assert response.status_code == 200
     assert response.json()["apiEndpoint"] == "https://api.siliconflow.cn/v1/chat/completions"
+
+
+def test_ai_analysis_config_crud_and_cached_audits(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.services.probe as probe_service
+
+    class FakeAIResponse:
+        status = 200
+        headers = {"Content-Type": "application/json"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def text(self) -> str:
+            return '{"choices":[{"message":{"content":"性能稳定，建议继续扩容。"}}]}'
+
+    class FakeAIClient:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, *, headers=None, json=None):  # noqa: ANN001, ARG002
+            return FakeAIResponse()
+
+    monkeypatch.setattr("app.services.ai_analysis.aiohttp.ClientSession", FakeAIClient)
+    monkeypatch.setattr("app.services.ai_analysis.normalize_openai_chat_endpoint", lambda value: value)
+    monkeypatch.setattr(probe_service, "get_adapter", lambda channel_type: FakeAdapter())
+
+    login()
+
+    channel = client.post(
+        "/api/channels",
+        json={
+            "name": "AI Analysis Channel",
+            "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+            "apiKey": "sk-test",
+            "modelIdentifier": "test-model",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    ).json()
+
+    created_task = client.post(
+        "/api/tasks",
+        json={
+            "name": "AI Analysis Guard",
+            "channelId": channel["id"],
+            "prompt": "ping",
+            "intervalMinutes": 5,
+            "concurrency": 1,
+            "status": "running",
+            "thresholds": {
+                "maxTtftMs": 300,
+                "minTps": 25,
+                "maxTotalLatencyMs": 1200,
+                "minSuccessRate": 0.95,
+            },
+            "alertChannels": [],
+        },
+    )
+    assert created_task.status_code == 200
+
+    config = client.put(
+        "/api/system/ai-analysis",
+        json={
+            "enabled": True,
+            "providerType": "openai-compatible",
+            "apiEndpoint": "http://localhost:8000/v1",
+            "apiKey": "sk-test",
+            "modelIdentifier": "deepseek-chat",
+            "scheduleMode": "weekly",
+        },
+    )
+    assert config.status_code == 200
+    assert config.json()["enabled"] is True
+
+    report = client.get("/api/reports/audit-advices?period=weekly")
+    assert report.status_code == 200
+    payload = report.json()
+    assert payload["items"][0]["source"] == "ai"
+    assert payload["items"][0]["analysisModelName"] == "deepseek-chat"
+    assert payload["items"][0]["advice"]
+    assert payload["items"][0]["generatedAt"] is not None
+
+    test_result = client.post("/api/system/ai-analysis/test")
+    assert test_result.status_code == 200
+    assert test_result.json()["ok"] is True
+
+    with SessionLocal() as db:
+        snapshot = db.scalar(select(AuditAdviceSnapshot))
+        assert snapshot is not None
+        assert snapshot.analysis_window_start is not None
+        assert snapshot.analysis_window_end is not None
+
+
+def test_ai_analysis_test_supports_unsaved_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def fake_test(config: AIAnalysisConfig) -> str:
+        captured["enabled"] = config.enabled
+        captured["api_endpoint"] = config.api_endpoint
+        captured["model_identifier"] = config.model_identifier
+        return "连通性测试通过。"
+
+    monkeypatch.setattr(ai_analysis_service, "test_ai_analysis_endpoint", fake_test)
+    monkeypatch.setattr("app.api.monitoring.test_ai_analysis_endpoint", fake_test)
+
+    login()
+
+    response = client.post(
+        "/api/system/ai-analysis/test",
+        json={
+            "enabled": True,
+            "providerType": "openai-compatible",
+            "apiEndpoint": "https://api.deepseek.com/v1",
+            "apiKey": "sk-runtime-test",
+            "modelIdentifier": "deepseek-chat",
+            "scheduleMode": "daily",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert captured["enabled"] is True
+    assert captured["api_endpoint"] == "https://api.deepseek.com/v1/chat/completions"
+    assert captured["model_identifier"] == "deepseek-chat"
+
+    with SessionLocal() as db:
+        config = ai_analysis_service.ensure_ai_analysis_config(db)
+        assert config.api_endpoint == ""
+        assert config.model_identifier == ""
+
+
+def test_ai_analysis_falls_back_to_rule_template_when_model_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.services.probe as probe_service
+
+    class EmptyAIResponse:
+        status = 200
+        headers = {"Content-Type": "application/json"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def text(self) -> str:
+            return '{"choices":[]}'
+
+    class EmptyAIClient:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url, *, headers=None, json=None):  # noqa: ANN001, ARG002
+            return EmptyAIResponse()
+
+    monkeypatch.setattr("app.services.ai_analysis.aiohttp.ClientSession", EmptyAIClient)
+    monkeypatch.setattr("app.services.ai_analysis.normalize_openai_chat_endpoint", lambda value: value)
+    monkeypatch.setattr(probe_service, "get_adapter", lambda channel_type: FakeAdapter())
+
+    login()
+
+    channel = client.post(
+        "/api/channels",
+        json={
+            "name": "Fallback Template Channel",
+            "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+            "apiKey": "sk-test",
+            "modelIdentifier": "test-model",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    ).json()
+
+    created_task = client.post(
+        "/api/tasks",
+        json={
+            "name": "Fallback Template Guard",
+            "channelId": channel["id"],
+            "prompt": "ping",
+            "intervalMinutes": 5,
+            "concurrency": 1,
+            "status": "running",
+            "thresholds": {
+                "maxTtftMs": 300,
+                "minTps": 25,
+                "maxTotalLatencyMs": 1200,
+                "minSuccessRate": 0.95,
+            },
+            "alertChannels": [],
+        },
+    )
+    assert created_task.status_code == 200
+
+    config = client.put(
+        "/api/system/ai-analysis",
+        json={
+            "enabled": True,
+            "providerType": "openai-compatible",
+            "apiEndpoint": "http://localhost:8000/v1",
+            "apiKey": "sk-test",
+            "modelIdentifier": "deepseek-chat",
+            "scheduleMode": "weekly",
+        },
+    )
+    assert config.status_code == 200
+
+    report = client.get("/api/reports/audit-advices?period=weekly")
+    assert report.status_code == 200
+    item = report.json()["items"][0]
+    assert item["source"] == "template"
+    assert "规则模板摘要" in item["advice"]
+    assert "成功率" in item["advice"]
+    assert "失败记录" not in item["advice"]
+    assert item["errorMessage"] == "AI 模型未返回可用建议内容"
+
+
+def test_audit_advices_show_disabled_when_ai_analysis_not_enabled() -> None:
+    login()
+    channel = client.post(
+        "/api/channels",
+        json={
+            "name": "Disabled Analysis Channel",
+            "apiEndpoint": "http://localhost:8000/v1/chat/completions",
+            "apiKey": "sk-test",
+            "modelIdentifier": "test-model",
+            "type": "openai",
+            "status": "active",
+            "tags": ["test"],
+            "description": "test",
+        },
+    ).json()
+    assert channel["id"]
+
+    report = client.get("/api/reports/audit-advices?period=weekly")
+    assert report.status_code == 200
+    item = report.json()["items"][0]
+    assert item["source"] == "disabled"
+    assert item["advice"] == "当前未启用 AI 建议"
 
 
 def test_manual_probe_writes_log_and_creates_incident(monkeypatch) -> None:
@@ -824,6 +1082,7 @@ def test_editing_running_task_triggers_fresh_probe(monkeypatch) -> None:
 def test_push_report_delivers_to_enabled_feishu_channels(monkeypatch) -> None:
     import app.services.notifier as notifier_service
     import app.services.probe as probe_service
+    import app.services.ai_analysis as ai_analysis_service
 
     sent_payloads: list[tuple[str, dict]] = []
 
@@ -877,6 +1136,17 @@ def test_push_report_delivers_to_enabled_feishu_channels(monkeypatch) -> None:
             "description": "test",
         },
     ).json()
+    snapshot_map = {
+        channel["id"]: AuditAdviceSnapshot(
+            channel_id=channel["id"],
+            period="weekly",
+            advice="平台 AI 资源健康诊断建议示例。",
+            source="template",
+            analysis_model_name=None,
+        )
+    }
+    monkeypatch.setattr(ai_analysis_service, "get_audit_advice_snapshot_map", lambda db, period: snapshot_map)
+    monkeypatch.setattr("app.api.monitoring.get_audit_advice_snapshot_map", lambda db, period: snapshot_map)
 
     created_task = client.post(
         "/api/tasks",
@@ -908,6 +1178,9 @@ def test_push_report_delivers_to_enabled_feishu_channels(monkeypatch) -> None:
     assert payload["attachmentSent"] is False
     assert "已跳过 PDF 附件发送" in payload["attachmentMessage"]
     assert len(sent_payloads) == 1
+    assert sent_payloads[0][1]["reportAdvices"][0]["channelName"] == "Report Channel"
+    assert sent_payloads[0][1]["reportAdvices"][0]["advice"] == "平台 AI 资源健康诊断建议示例。"
+    assert sent_payloads[0][1]["reportAdvices"][0]["source"] == "template"
     assert sent_payloads[0][0] == "DevOps 飞书群"
     assert sent_payloads[0][1]["kind"] == "report"
     assert sent_payloads[0][1]["periodLabel"] == "周报"

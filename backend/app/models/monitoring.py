@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -115,3 +115,39 @@ class ProbeRun(Base):
     error_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     batch: Mapped[ProbeBatch] = relationship("ProbeBatch", back_populates="runs")
+
+
+class AIAnalysisConfig(Base):
+    __tablename__ = "ai_analysis_configs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    provider_type: Mapped[str] = mapped_column(String(32), default="openai-compatible", nullable=False)
+    api_endpoint: Mapped[str] = mapped_column(String(1024), default="", nullable=False)
+    api_key_encrypted: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    model_identifier: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    schedule_mode: Mapped[str] = mapped_column(String(16), default="weekly", nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="idle", nullable=False)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+
+class AuditAdviceSnapshot(Base):
+    __tablename__ = "audit_advice_snapshots"
+    __table_args__ = (UniqueConstraint("channel_id", "period", name="uq_audit_advice_channel_period"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: str(uuid4()))
+    channel_id: Mapped[str] = mapped_column(ForeignKey("model_channels.id", ondelete="CASCADE"), index=True)
+    period: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    advice: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    source: Mapped[str] = mapped_column(String(16), default="disabled", nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    analysis_model_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    analysis_window_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    analysis_window_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -15,6 +15,9 @@ AlertType = Literal["feishu", "dingtalk", "webhook", "email"]
 AlertStatus = Literal["enabled", "disabled"]
 NotificationStatus = Literal["firing", "resolved"]
 DeploymentMode = Literal["k8s", "docker", "bare_metal", "other"]
+AIProviderType = Literal["openai-compatible"]
+AIScheduleMode = Literal["daily", "weekly", "monthly"]
+AIAnalysisStatus = Literal["idle", "running", "healthy", "error"]
 
 
 class SLAThresholds(BaseModel):
@@ -242,7 +245,19 @@ class AuditAdviceRequest(BaseModel):
 class AuditAdviceChannelResponse(BaseModel):
     channelId: str
     advice: str
-    source: Literal["ai", "disabled", "error"]
+    source: Literal["ai", "template", "disabled", "error", "loading"]
+    generatedAt: datetime | None = None
+    analysisModelName: str | None = None
+    errorMessage: str | None = None
+
+
+class ReportAdviceItem(BaseModel):
+    channelId: str
+    channelName: str
+    advice: str
+    source: Literal["ai", "template", "disabled", "error", "loading"]
+    generatedAt: datetime | None = None
+    analysisModelName: str | None = None
 
 
 class AuditAdviceResponse(BaseModel):
@@ -256,6 +271,66 @@ class ReportSummaryResponse(BaseModel):
     successRate: float
     overallSlaScore: float
     channels: list[ReportChannelSummary]
+
+
+class ReportPushAdviceItem(BaseModel):
+    channelId: str
+    channelName: str
+    advice: str
+    source: Literal["ai", "template", "disabled", "error", "loading"]
+    generatedAt: datetime | None = None
+    analysisModelName: str | None = None
+
+
+class ReportPushPayload(BaseModel):
+    kind: Literal["report"] = "report"
+    periodLabel: str
+    timestamp: str
+    summary: str
+    totalDials: int
+    successRate: float
+    overallSlaScore: float
+    channelCount: int
+    weakestChannels: list[dict]
+    reportAdvices: list[ReportPushAdviceItem] = Field(default_factory=list)
+
+
+class AIAnalysisConfigBase(BaseModel):
+    enabled: bool = False
+    providerType: AIProviderType = "openai-compatible"
+    apiEndpoint: str = ""
+    apiKey: str = ""
+    modelIdentifier: str = ""
+    scheduleMode: AIScheduleMode = "weekly"
+
+
+class AIAnalysisConfigUpdate(AIAnalysisConfigBase):
+    pass
+
+
+class AIAnalysisConfigTestRequest(AIAnalysisConfigBase):
+    pass
+
+
+class AIAnalysisConfigResponse(APIModel):
+    enabled: bool
+    providerType: AIProviderType
+    apiEndpoint: str
+    apiKey: str
+    modelIdentifier: str
+    scheduleMode: AIScheduleMode
+    status: AIAnalysisStatus
+    lastRunAt: datetime | None = None
+    lastSuccessAt: datetime | None = None
+    lastError: str | None = None
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class AIAnalysisTestResponse(BaseModel):
+    ok: bool
+    status: AIAnalysisStatus
+    message: str
 
 
 class ReportPushResponse(BaseModel):
